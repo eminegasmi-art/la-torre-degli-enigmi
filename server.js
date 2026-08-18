@@ -5,8 +5,9 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const {
-  DOOR_COUNT, TOTAL_TIME_MS, PENALTY_MS,
+  DOOR_COUNT, TOTAL_TIME_MS,
   generateDoors, checkBoardCorrect, applyBoardUpdate,
+  penaltyForAttempt, speedBonusFor,
 } = require('./gameLogic');
 
 const app = express();
@@ -35,6 +36,7 @@ function publicDoorView(door) {
     board: door.board,
     choices: door.choices,
     sliderMax: door.sliderMax,
+    cells: door.cells,
   };
 }
 
@@ -93,6 +95,8 @@ io.on('connection', (socket) => {
       currentDoorIndex: 0,
       deadlineTs: null,
       wrongCount: 0,
+      doorWrongAttempts: 0,
+      doorStartTs: null,
       log: [],
     };
     rooms[code] = room;
@@ -132,6 +136,8 @@ io.on('connection', (socket) => {
     room.currentDoorIndex = 0;
     room.deadlineTs = Date.now() + TOTAL_TIME_MS;
     room.wrongCount = 0;
+    room.doorWrongAttempts = 0;
+    room.doorStartTs = Date.now();
     room.status = 'playing';
     room.log = ['La squadra varca il portale della Torre degli Enigmi...'];
     cb && cb({ ok: true });
@@ -151,18 +157,29 @@ io.on('connection', (socket) => {
     const room = findRoomBySocket(socket);
     if (!room || room.status !== 'playing') return cb && cb({ ok: false });
     const door = room.doors[room.currentDoorIndex];
+    const isFinalDoor = room.currentDoorIndex === room.doors.length - 1;
     const correct = checkBoardCorrect(door, door.board);
     if (correct) {
+      const elapsed = Date.now() - (room.doorStartTs || Date.now());
+      const bonus = speedBonusFor(elapsed, isFinalDoor);
+      if (bonus > 0) {
+        room.deadlineTs += bonus;
+        room.log.push(`Porta superata in fretta (${Math.round(elapsed / 1000)}s): +${bonus / 1000} secondi alla clessidra!`);
+      }
       room.log.push(`Porta ${room.currentDoorIndex + 1} superata: "${door.title}"!`);
       room.currentDoorIndex++;
+      room.doorWrongAttempts = 0;
+      room.doorStartTs = Date.now();
       if (room.currentDoorIndex >= room.doors.length) {
         room.status = 'won';
         room.log.push('La squadra è fuggita dalla Torre! Vittoria!');
       }
     } else {
       room.wrongCount++;
-      room.deadlineTs -= PENALTY_MS;
-      room.log.push('Tentativo errato: la clessidra perde 20 secondi.');
+      room.doorWrongAttempts++;
+      const penalty = penaltyForAttempt(room.doorWrongAttempts, isFinalDoor);
+      room.deadlineTs -= penalty;
+      room.log.push(`Tentativo errato: la clessidra perde ${penalty / 1000} secondi.`);
       if (Date.now() >= room.deadlineTs) {
         room.status = 'lost';
         room.log.push('La sabbia è finita: la Torre vi ha inghiottiti.');
@@ -181,6 +198,8 @@ io.on('connection', (socket) => {
     room.currentDoorIndex = 0;
     room.deadlineTs = null;
     room.wrongCount = 0;
+    room.doorWrongAttempts = 0;
+    room.doorStartTs = null;
     room.log = [];
     cb && cb({ ok: true });
     broadcastState(room);

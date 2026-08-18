@@ -1,18 +1,20 @@
 # La Torre degli Enigmi 🏰🔒
 
-Gioco cooperativo online per 2-6 giocatori. La squadra deve superare **5
-porte magiche** prima che si esaurisca una clessidra condivisa da 8 minuti.
+Gioco cooperativo online per 2-6 giocatori. La squadra deve superare **10
+porte magiche** prima che si esaurisca una clessidra condivisa da 12 minuti.
 
 **A differenza degli altri giochi della saga, qui si può parlare
 liberamente** — anzi, è proprio il punto: coordinarsi a voce.
 
 ## Come si gioca
-- Ogni porta è un enigma generato al momento, pescato a caso tra 12 tipi
+- Ogni porta è un enigma generato al momento, pescato a caso tra 13 tipi
   (diverso ogni partita): somme segrete, sequenze da ricostruire, numeri
-  segreti da ricostruire cifra per cifra, un numero mancante da dedurre da
-  una sequenza, un'operazione a sorpresa (somma/differenza/prodotto/conta i
-  pari), un bugiardo da smascherare, leve da portare al valore giusto, una
-  leva di precisione guidata a voce, ruote simboliche da far girare, un
+  segreti da ricostruire cifra per cifra (con indizi in stile "poetico",
+  frasi variate ogni volta), una mappa strappata con una tappa mancante da
+  dedurre, un numero mancante da dedurre da una sequenza, un'operazione a
+  sorpresa (somma/differenza/prodotto/conta i pari), un bugiardo da
+  smascherare (solo da 3 giocatori in su), leve da portare al valore giusto,
+  una leva di precisione guidata a voce, ruote simboliche da far girare, un
   simbolo da descrivere senza nominarlo, colori da abbinare, interruttori da
   sistemare.
 - Ognuno vede sul proprio telefono **un indizio privato diverso**, che aiuta
@@ -20,9 +22,14 @@ liberamente** — anzi, è proprio il punto: coordinarsi a voce.
 - Il board è visibile e modificabile da chiunque, in tempo reale: descrivetevi
   a voce cosa sapete e mettetelo a posto insieme.
 - Quando pensate di avercela fatta, premete **Conferma soluzione**. Giusto →
-  si passa alla porta successiva. Sbagliato → si perdono 20 secondi dalla
-  clessidra, ma si può riprovare subito.
-- Si vince superando tutte e 5 le porte prima che il tempo scada.
+  si passa alla porta successiva, e se l'avete risolta in fretta (sotto i 30
+  secondi) recuperate anche un po' di tempo sulla clessidra. Sbagliato → si
+  perde tempo, e la penalità **cresce a ogni errore sulla stessa porta**
+  (15s, poi 20s, poi 25s...), quindi conviene ragionarci invece di tentare a
+  caso. Sotto il minuto la clessidra pulsa e si sente un "tic" che accelera.
+- **L'ultima porta è la più dura**: niente bonus di velocità e penalità più
+  severe per gli errori — uno sprint finale a posta alta.
+- Si vince superando tutte e 10 le porte prima che il tempo scada.
 
 ## Pubblicare il server (una volta sola)
 

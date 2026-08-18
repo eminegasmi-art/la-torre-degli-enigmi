@@ -62,7 +62,27 @@ const COLORS = [
 // ---- Parametri di partita -------------------------------------------------
 const DOOR_COUNT = 10;
 const TOTAL_TIME_MS = 12 * 60 * 1000; // 12 minuti totali per l'intera torre
-const PENALTY_MS = 20 * 1000; // penalità per ogni tentativo errato
+const PENALTY_MS = 20 * 1000; // penalità di riferimento (compat), la reale è calcolata da penaltyForAttempt
+const PENALTY_BASE_MS = 15 * 1000; // primo errore su una porta
+const PENALTY_STEP_MS = 5 * 1000; // ogni errore successivo sulla STESSA porta costa di più
+const SPEED_BONUS_THRESHOLD_MS = 30 * 1000; // sotto questa soglia scatta il bonus
+const SPEED_BONUS_MS = 10 * 1000; // secondi recuperati risolvendo in fretta
+const FINAL_DOOR_PENALTY_MULTIPLIER = 1.5; // l'ultima porta punisce di più gli errori
+
+// Penalità per un tentativo errato: cresce a ogni errore SULLA STESSA porta
+// (si azzera quando si passa alla porta successiva), ed è più severa
+// sull'ultima porta per uno sprint finale con la posta più alta.
+function penaltyForAttempt(attemptNumber, isFinalDoor) {
+  const base = PENALTY_BASE_MS + Math.max(0, attemptNumber - 1) * PENALTY_STEP_MS;
+  return Math.round(isFinalDoor ? base * FINAL_DOOR_PENALTY_MULTIPLIER : base);
+}
+
+// Bonus di tempo per aver risolto in fretta: niente bonus sull'ultima porta
+// (lo sprint finale non permette di "comprare" altro tempo).
+function speedBonusFor(elapsedMs, isFinalDoor) {
+  if (isFinalDoor) return 0;
+  return elapsedMs <= SPEED_BONUS_THRESHOLD_MS ? SPEED_BONUS_MS : 0;
+}
 
 // ---- Generatori dei singoli tipi di porta --------------------------------
 
@@ -89,7 +109,7 @@ function genBrokenSequence(numPlayers) {
     title: 'La Scala Crescente',
     instructions: 'Ognuno conosce un numero. Sistemate tutti i numeri della squadra in ordine crescente, da sinistra a destra.',
     boardKind: 'sequenceSlots',
-    board: Array(numPlayers).fill(1),
+    board: Array(numPlayers).fill(null),
     choices: null,
     clues: nums.map((n) => `Il tuo numero è ${n}.`),
     solution,
@@ -101,12 +121,23 @@ function genBrokenSequence(numPlayers) {
 // numero con certezza assoluta - niente più indizi vaghi tipo "maggiore di
 // N" che da soli non bastano a determinare un numero preciso. La difficoltà
 // scala naturalmente col numero di giocatori (più giocatori = più cifre).
+const POETIC_TEMPLATES = [
+  (d, p) => `Un'iscrizione consumata dal tempo recita: "la cifra è ${d}, posizione ${p} da sinistra".`,
+  (d, p) => `Tra le rune incise si legge: la cifra è ${d}, posizione ${p} da sinistra.`,
+  (d, p) => `Un vecchio indovinello sussurra: posizione ${p} da sinistra, la cifra è ${d}.`,
+  (d, p) => `Nel tuo frammento di pergamena è scritto: la cifra è ${d}, posizione ${p} da sinistra.`,
+  (d, p) => `Il guardiano mormora: posizione ${p} da sinistra, la cifra è ${d}.`,
+];
+
 function genPoeticClues(numPlayers) {
   const numDigits = clamp(numPlayers, 2, 6);
   const digits = [randInt(1, 9)]; // la prima cifra non è mai 0
   for (let i = 1; i < numDigits; i++) digits.push(randInt(0, 9));
   const solution = Number(digits.join(''));
-  const clues = digits.map((d, i) => `La tua cifra segreta è ${d}, in posizione ${i + 1} da sinistra (il numero ha ${numDigits} cifre in totale).`);
+  const clues = digits.map((d, i) => {
+    const template = POETIC_TEMPLATES[randInt(0, POETIC_TEMPLATES.length - 1)];
+    return template(d, i + 1);
+  });
   return {
     type: 'poetic',
     title: 'Il Sussurro dei Numeri',
@@ -225,6 +256,32 @@ function genMissingNumber(numPlayers) {
     boardKind: 'number',
     board: null,
     choices: null,
+    clues,
+    solution,
+  };
+}
+
+// Stesso meccanismo affidabile de "Il Numero Mancante" (un passo costante,
+// sempre deducibile con certezza), ma con ambientazione da mappa del tesoro
+// e resa visiva a strisce di pergamena strappata sul client (vedi `cells`).
+function genTornMap(numPlayers) {
+  const L = numPlayers + 1;
+  const start = randInt(5, 20);
+  const step = randInt(2, 9);
+  const terms = Array.from({ length: L }, (_, i) => start + i * step);
+  const missingIndex = randInt(0, L - 1);
+  const solution = terms[missingIndex];
+  const knownPositions = terms.map((_, i) => i).filter((i) => i !== missingIndex);
+  const clues = knownPositions.map((pos) => `Il tuo frammento di pergamena mostra: alla tappa ${pos + 1} del cammino, la distanza segnata è ${terms[pos]} leghe.`);
+  const cells = terms.map((v, i) => ({ pos: i + 1, value: i === missingIndex ? null : v, missing: i === missingIndex }));
+  return {
+    type: 'map',
+    title: 'La Mappa Strappata',
+    instructions: `Un'antica mappa segna ${L} tappe di un cammino, con una distanza regolare tra una tappa e la successiva (sempre lo stesso passo). Un frammento è andato perso: deducete il passo e ricostruite la distanza mancante alla tappa ${missingIndex + 1}.`,
+    boardKind: 'number',
+    board: null,
+    choices: null,
+    cells,
     clues,
     solution,
   };
@@ -373,6 +430,7 @@ const DOOR_GENERATORS = {
   operation: genOperation,
   guess: genGuessSymbol,
   timeLever: genTimeLever,
+  map: genTornMap,
 };
 const DOOR_TYPES = Object.keys(DOOR_GENERATORS);
 
@@ -383,13 +441,17 @@ function generateDoor(type, numPlayers) {
 }
 
 // Sceglie `count` tipi di porta a caso, evitando ripetizioni immediate.
-function randomDoorPlan(count) {
+// Con 2 giocatori si esclude "liar": con un solo indizio vero e uno falso,
+// senza un terzo punto di vista non c'è modo di distinguerli (nessuna
+// "maggioranza" possibile) - il bug segnalato di "non funziona in 2".
+function randomDoorPlan(count, numPlayers) {
+  const availableTypes = numPlayers < 3 ? DOOR_TYPES.filter((t) => t !== 'liar') : DOOR_TYPES;
   const plan = [];
-  let pool = shuffle(DOOR_TYPES);
+  let pool = shuffle(availableTypes);
   let last = null;
   for (let i = 0; i < count; i++) {
     if (pool.length === 0) {
-      pool = shuffle(DOOR_TYPES);
+      pool = shuffle(availableTypes);
       if (pool[0] === last && pool.length > 1) [pool[0], pool[1]] = [pool[1], pool[0]];
     }
     const t = pool.shift();
@@ -400,7 +462,7 @@ function randomDoorPlan(count) {
 }
 
 function generateDoors(count, numPlayers) {
-  return randomDoorPlan(count).map((type) => generateDoor(type, numPlayers));
+  return randomDoorPlan(count, numPlayers).map((type) => generateDoor(type, numPlayers));
 }
 
 // ---- Verifica soluzione ---------------------------------------------------
@@ -475,6 +537,11 @@ module.exports = {
   DOOR_COUNT,
   TOTAL_TIME_MS,
   PENALTY_MS,
+  PENALTY_BASE_MS,
+  PENALTY_STEP_MS,
+  SPEED_BONUS_THRESHOLD_MS,
+  SPEED_BONUS_MS,
+  FINAL_DOOR_PENALTY_MULTIPLIER,
   DOOR_TYPES,
   WHEEL_SYMBOLS,
   COLORS,
@@ -483,4 +550,6 @@ module.exports = {
   randomDoorPlan,
   checkBoardCorrect,
   applyBoardUpdate,
+  penaltyForAttempt,
+  speedBonusFor,
 };

@@ -165,6 +165,14 @@
   }
   .chip .icon-svg { width: 14px; height: 14px; }
   #timer-chip.low { color: var(--blood-light); border-color: var(--blood-light); }
+  @keyframes pulseWarn { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+  @keyframes pulseCritical { 0%, 100% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.14); filter: brightness(1.35); } }
+  #timer-chip.warning { animation: pulseWarn 1s ease-in-out infinite; }
+  #timer-chip.critical { animation: pulseCritical 0.45s ease-in-out infinite; }
+  #door-chip.final-door {
+    background: linear-gradient(180deg, var(--blood-light), var(--blood)); color: #fff; border-color: var(--blood-light);
+    animation: pulseWarn 1.4s ease-in-out infinite;
+  }
 
   .timer-bar { width: 100%; height: 7px; background: var(--wood-dark); border-radius: 999px; overflow: hidden; border: 1px solid var(--ink); flex-shrink: 0; }
   .timer-bar-fill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-light)); transition: width 0.3s linear, background 0.3s; }
@@ -192,9 +200,24 @@
   }
 
   .number-board { display: flex; align-items: center; justify-content: center; width: 100%; }
+  .number-board.has-map { flex-direction: column; gap: 10px; }
   .number-input {
     width: 200px; text-align: center; font-size: 1.6rem; font-family: 'Cinzel', serif; font-weight: 700;
     padding: 8px; border-radius: 8px; border: 2px solid var(--gold); background: var(--parchment); color: var(--ink);
+  }
+
+  .map-strip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px; max-width: 100%; -webkit-overflow-scrolling: touch; }
+  .map-tile {
+    flex: 0 0 auto; width: 50px; height: 60px; border-radius: 6px;
+    background: linear-gradient(160deg, var(--parchment), var(--parchment-2));
+    border: 2px solid var(--gold); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    color: var(--ink); font-family: 'Cinzel', serif;
+  }
+  .map-tile .tile-pos { font-size: 0.52rem; color: #7a6338; }
+  .map-tile .tile-value { font-size: 0.92rem; font-weight: 700; }
+  .map-tile.missing {
+    border-style: dashed; border-color: var(--blood-light); color: var(--blood-light);
+    background: repeating-linear-gradient(45deg, var(--wood-mid), var(--wood-mid) 4px, var(--wood-dark) 4px, var(--wood-dark) 8px);
   }
 
   .choice-board { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; }
@@ -549,19 +572,63 @@
     const ss = totalSec % 60;
     const timerText = document.getElementById('timer-text');
     const timerChip = document.getElementById('timer-chip');
+    const critical = remaining > 0 && remaining < 20000;
+    const warning = remaining > 0 && remaining < 60000;
     if (timerText) timerText.textContent = `${mm}:${String(ss).padStart(2, '0')}`;
-    const low = remaining < 30000;
-    if (timerChip) timerChip.classList.toggle('low', low);
+    if (timerChip) {
+      timerChip.classList.toggle('low', warning);
+      timerChip.classList.toggle('warning', warning && !critical);
+      timerChip.classList.toggle('critical', critical);
+    }
     const bar = document.getElementById('timer-bar-fill');
     if (bar) {
       const pct = Math.max(0, Math.min(100, (remaining / TOTAL_TIME_MS) * 100));
       bar.style.width = pct + '%';
-      bar.classList.toggle('low', low);
+      bar.classList.toggle('low', warning);
+    }
+    // Tensione sonora: un "tic" che accelera man mano che il tempo scende
+    // sotto il minuto, e ancora di più sotto i 20 secondi.
+    if (warning) {
+      const intervalMs = critical ? 500 : 1000;
+      const now = Date.now();
+      if (now - lastBeepAt >= intervalMs) {
+        beep(critical ? 880 : 660, 0.1);
+        lastBeepAt = now;
+      }
     }
   }
 
+  // ---- Suono di tensione (Web Audio API, nessun file esterno) -------------
+  let audioCtx = null;
+  let lastBeepAt = 0;
+  function ensureAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      else if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* audio non disponibile, pace */ }
+  }
+  document.addEventListener('pointerdown', ensureAudio);
+  function beep(freq, duration) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.16, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch (e) { /* pace */ }
+  }
+
   function renderGame(state) {
-    document.getElementById('door-chip').textContent = `Porta ${state.doorIndex + 1} di ${state.totalDoors}`;
+    const doorChip = document.getElementById('door-chip');
+    const isFinalDoor = state.doorIndex === state.totalDoors - 1;
+    doorChip.textContent = isFinalDoor ? 'ULTIMA PORTA!' : `Porta ${state.doorIndex + 1} di ${state.totalDoors}`;
+    doorChip.classList.toggle('final-door', isFinalDoor);
     updateTimerDisplay(state.deadlineTs);
 
     const door = state.door;
@@ -589,7 +656,18 @@
 
     if (door.boardKind === 'number') {
       const wrap = document.createElement('div');
-      wrap.className = 'number-board';
+      wrap.className = 'number-board' + (door.cells ? ' has-map' : '');
+      if (door.cells) {
+        const strip = document.createElement('div');
+        strip.className = 'map-strip';
+        door.cells.forEach((cell) => {
+          const tile = document.createElement('div');
+          tile.className = 'map-tile' + (cell.missing ? ' missing' : '');
+          tile.innerHTML = `<span class="tile-pos">${cell.pos}</span><span class="tile-value">${cell.missing ? '?' : cell.value}</span>`;
+          strip.appendChild(tile);
+        });
+        wrap.appendChild(strip);
+      }
       const input = document.createElement('input');
       input.type = 'number';
       input.inputMode = 'numeric';
@@ -630,7 +708,8 @@
         input.type = 'number';
         input.inputMode = 'numeric';
         input.className = 'slot-input';
-        input.value = v;
+        input.placeholder = '?';
+        input.value = v == null ? '' : v;
         input.addEventListener('input', () => {
           const val = Number(input.value);
           socket.emit('updateBoard', { kind: 'setSlot', slot: i, value: isNaN(val) ? 1 : val });
@@ -723,7 +802,7 @@
       });
     } else if (door.boardKind === 'sequenceSlots') {
       area.querySelectorAll('.slot-input').forEach((input, i) => {
-        if (document.activeElement !== input) input.value = door.board[i];
+        if (document.activeElement !== input) input.value = door.board[i] == null ? '' : door.board[i];
       });
     } else if (door.boardKind === 'sliderSlots') {
       area.querySelectorAll('.slot-range').forEach((input, i) => {

@@ -1,8 +1,11 @@
 // Test della logica pura di "La Torre degli Enigmi" (node test.js)
 const assert = require('assert');
 const {
-  DOOR_COUNT, TOTAL_TIME_MS, PENALTY_MS, DOOR_TYPES, WHEEL_SYMBOLS, COLORS,
+  DOOR_COUNT, TOTAL_TIME_MS, PENALTY_MS, PENALTY_BASE_MS, PENALTY_STEP_MS,
+  SPEED_BONUS_THRESHOLD_MS, SPEED_BONUS_MS, FINAL_DOOR_PENALTY_MULTIPLIER,
+  DOOR_TYPES, WHEEL_SYMBOLS, COLORS,
   generateDoor, generateDoors, randomDoorPlan, checkBoardCorrect, applyBoardUpdate,
+  penaltyForAttempt, speedBonusFor,
 } = require('./gameLogic');
 
 let passed = 0;
@@ -12,7 +15,7 @@ function check(desc, cond) {
   console.log('  ok -', desc);
 }
 
-check('ci sono 12 tipi di porta', DOOR_TYPES.length === 12);
+check('ci sono 13 tipi di porta', DOOR_TYPES.length === 13);
 check('parametri di partita sensati', DOOR_COUNT >= 3 && TOTAL_TIME_MS > 0 && PENALTY_MS > 0);
 
 // ---- Ogni generatore produce una porta valida e coerente -----------------
@@ -47,8 +50,12 @@ for (const numPlayers of [2, 3, 4, 5, 6]) {
   const digitsFromSolution = String(X).split('').map(Number);
   check(`poetic/${numPlayers}p: il numero segreto ha esattamente ${numPlayers} cifre`, digitsFromSolution.length === numPlayers);
   const parsed = door.clues.map((c) => {
-    const m = c.match(/cifra segreta è (\d), in posizione (\d+)/);
-    return { digit: Number(m[1]), pos: Number(m[2]) };
+    // Frasi variate ("poetiche"): la cifra e la posizione possono comparire
+    // in ordine diverso a seconda del modello scelto, quindi si estraggono
+    // in modo indipendente invece di pretendere un ordine fisso.
+    const dm = c.match(/cifra è (\d)/);
+    const pm = c.match(/posizione (\d+)/);
+    return { digit: Number(dm[1]), pos: Number(pm[1]) };
   });
   const rebuilt = Array(numPlayers).fill(null);
   parsed.forEach((p) => { rebuilt[p.pos - 1] = p.digit; });
@@ -127,6 +134,33 @@ for (const numPlayers of [2, 3, 4, 6]) {
   const missingPos = Number(missingPosGuess[1]);
   const reconstructed = inferred + steps[0] * missingPos;
   check(`missing/${numPlayers}p: il passo dedotto dagli indizi ricostruisce ESATTAMENTE il valore mancante`, reconstructed === door.solution);
+}
+
+// ---- map (La Mappa Strappata): stesso principio di "missing", più i dati per la resa visiva (`cells`) ----
+for (const numPlayers of [2, 3, 4, 6]) {
+  const door = generateDoor('map', numPlayers);
+  check(`map/${numPlayers}p: ha ${numPlayers + 1} celle totali`, door.cells.length === numPlayers + 1);
+  check(`map/${numPlayers}p: esattamente una cella è "missing"`, door.cells.filter((c) => c.missing).length === 1);
+  const missingCell = door.cells.find((c) => c.missing);
+  check(`map/${numPlayers}p: la cella mancante non ha un valore visibile`, missingCell.value === null);
+  const known = door.cells.filter((c) => !c.missing).sort((a, b) => a.pos - b.pos);
+  const steps = [];
+  for (let i = 1; i < known.length; i++) steps.push((known[i].value - known[0].value) / (known[i].pos - known[0].pos));
+  check(`map/${numPlayers}p: tutte le celle note condividono lo stesso passo costante`, steps.every((s) => s === steps[0]));
+  const reconstructed = known[0].value + steps[0] * (missingCell.pos - known[0].pos);
+  check(`map/${numPlayers}p: il passo dedotto ricostruisce ESATTAMENTE il valore mancante`, reconstructed === door.solution);
+  check(`map/${numPlayers}p: ha ${numPlayers} indizi (uno a testa)`, door.clues.length === numPlayers);
+}
+
+// ---- penaltyForAttempt / speedBonusFor: crescita, tetto porta finale, niente bonus sull'ultima porta ----
+{
+  check('penaltyForAttempt: il primo errore costa la penalità base', penaltyForAttempt(1, false) === PENALTY_BASE_MS);
+  check('penaltyForAttempt: il secondo errore costa di più del primo (crescente)', penaltyForAttempt(2, false) > penaltyForAttempt(1, false));
+  check('penaltyForAttempt: il terzo errore costa ancora di più del secondo', penaltyForAttempt(3, false) > penaltyForAttempt(2, false));
+  check('penaltyForAttempt: sull\'ultima porta la stessa sequenza di errori costa sempre di più', penaltyForAttempt(1, true) > penaltyForAttempt(1, false));
+  check('speedBonusFor: risolvendo entro la soglia si ottiene il bonus pieno', speedBonusFor(SPEED_BONUS_THRESHOLD_MS - 1, false) === SPEED_BONUS_MS);
+  check('speedBonusFor: risolvendo oltre la soglia non c\'è bonus', speedBonusFor(SPEED_BONUS_THRESHOLD_MS + 1, false) === 0);
+  check('speedBonusFor: sull\'ultima porta non c\'è MAI bonus, anche se velocissimi', speedBonusFor(1, true) === 0);
 }
 
 // ---- operation: la soluzione corrisponde davvero all'operazione dichiarata (su tante generazioni, copre tutti gli operatori) ----
@@ -231,6 +265,18 @@ for (const numPlayers of [2, 3, 4, 6]) {
   const doors = generateDoors(DOOR_COUNT, 4);
   check(`generateDoors: genera esattamente ${DOOR_COUNT} porte`, doors.length === DOOR_COUNT);
   check('generateDoors: ogni porta ha 4 indizi (uno a giocatore)', doors.every((d) => d.clues.length === 4));
+}
+
+// ---- Con 2 giocatori "liar" non deve mai comparire (indeducibile senza un terzo punto di vista) ----
+{
+  const plan = randomDoorPlan(40, 2);
+  check('randomDoorPlan/2p: "liar" non compare mai su 40 porte generate per una coppia', !plan.includes('liar'));
+  const doors = generateDoors(DOOR_COUNT, 2);
+  check('generateDoors/2p: nessuna delle porte generate è "liar"', doors.every((d) => d.type !== 'liar'));
+}
+{
+  const plan = randomDoorPlan(40, 3);
+  check('randomDoorPlan/3p: "liar" può comparire con 3 o più giocatori', plan.includes('liar') || DOOR_TYPES.length > 40 /* fallback improbabile */);
 }
 
 // ---- Simulazione end-to-end: risolvere una torre intera applicando la
