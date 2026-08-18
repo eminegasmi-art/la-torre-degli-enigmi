@@ -1,0 +1,14 @@
+{
+  "name": "la-torre-degli-enigmi",
+  "version": "1.0.0",
+  "description": "Gioco cooperativo multiplayer 2-6 giocatori: superate insieme le porte della Torre prima che scada il tempo.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
