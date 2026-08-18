@@ -193,7 +193,7 @@ function genSplitKnowledge(numPlayers, config) {
 }
 
 function genLevers(numPlayers) {
-  return genSplitKnowledge(numPlayers, {
+  const door = genSplitKnowledge(numPlayers, {
     type: 'levers',
     title: 'Le Leve del Meccanismo',
     instructions: 'Ogni leva ha un valore corretto da 0 a 10, noto a un solo membro della squadra. Portate ogni leva al valore giusto.',
@@ -202,6 +202,126 @@ function genLevers(numPlayers) {
     solutionGen: () => randInt(0, 10),
     labelFn: (i, v) => `La leva numero ${i + 1} deve arrivare a ${v}.`,
   });
+  door.sliderMax = 10;
+  return door;
+}
+
+// La sequenza segue un passo costante (crescente); manca un valore, e ogni
+// giocatore ne conosce uno con la sua posizione. Sempre deducibile: bastano
+// due posizioni qualsiasi per calcolare il passo e ricostruire il resto.
+function genMissingNumber(numPlayers) {
+  const L = numPlayers + 1;
+  const start = randInt(1, 15);
+  const step = randInt(1, 7);
+  const terms = Array.from({ length: L }, (_, i) => start + i * step);
+  const missingIndex = randInt(0, L - 1);
+  const solution = terms[missingIndex];
+  const knownPositions = terms.map((_, i) => i).filter((i) => i !== missingIndex);
+  const clues = knownPositions.map((pos) => `La posizione ${pos + 1} della sequenza vale ${terms[pos]}.`);
+  return {
+    type: 'missing',
+    title: 'Il Numero Mancante',
+    instructions: `La sequenza ha ${L} posizioni e segue un andamento regolare (si aggiunge sempre lo stesso passo). Manca il valore in posizione ${missingIndex + 1}: deducete il passo e trovatelo.`,
+    boardKind: 'number',
+    board: null,
+    choices: null,
+    clues,
+    solution,
+  };
+}
+
+// Variante della somma segreta con operazione a sorpresa: tiene la squadra
+// sveglia perché non sa mai in anticipo cosa dovrà calcolare.
+function genOperation(numPlayers) {
+  const opKeys = ['somma', 'differenza', 'prodotto', 'pari'];
+  const op = opKeys[randInt(0, opKeys.length - 1)];
+  let nums;
+  let solution;
+  let howLabel;
+  if (op === 'somma') {
+    nums = Array.from({ length: numPlayers }, () => randInt(2, 20));
+    solution = nums.reduce((a, b) => a + b, 0);
+    howLabel = 'Sommate tutti i numeri della squadra e inserite il totale.';
+  } else if (op === 'differenza') {
+    nums = Array.from({ length: numPlayers }, () => randInt(1, 50));
+    solution = Math.max(...nums) - Math.min(...nums);
+    howLabel = 'Calcolate la differenza tra il numero più alto e il numero più basso della squadra e inseritela.';
+  } else if (op === 'prodotto') {
+    nums = Array.from({ length: numPlayers }, () => randInt(2, 6));
+    solution = nums.reduce((a, b) => a * b, 1);
+    howLabel = 'Moltiplicate tutti i numeri della squadra tra loro e inserite il risultato.';
+  } else {
+    nums = Array.from({ length: numPlayers }, () => randInt(1, 50));
+    solution = nums.filter((n) => n % 2 === 0).length;
+    howLabel = 'Contate quanti numeri PARI ci sono in tutta la squadra e inserite il conteggio.';
+  }
+  return {
+    type: 'operation',
+    title: 'La Serratura del Calcolo',
+    instructions: howLabel,
+    boardKind: 'number',
+    board: null,
+    choices: null,
+    clues: nums.map((n) => `Il tuo numero segreto è ${n}.`),
+    solution,
+  };
+}
+
+// Un solo giocatore vede il simbolo giusto e deve descriverlo a voce SENZA
+// nominarlo; gli altri scelgono tra 4 icone mostrate sul loro schermo.
+function genGuessSymbol(numPlayers) {
+  const solutionIdx = randInt(0, WHEEL_SYMBOLS.length - 1);
+  const describerIndex = randInt(0, numPlayers - 1);
+  const decoyPool = WHEEL_SYMBOLS.map((_, i) => i).filter((i) => i !== solutionIdx);
+  const decoyIdx = sample(decoyPool, Math.min(3, decoyPool.length));
+  const choices = shuffle([solutionIdx, ...decoyIdx]);
+  const clues = [];
+  for (let i = 0; i < numPlayers; i++) {
+    if (i === describerIndex) {
+      clues.push(`Devi DESCRIVERE a voce questo simbolo, senza mai nominarlo: ${WHEEL_SYMBOLS[solutionIdx].label}.`);
+    } else {
+      clues.push('Nessun indizio per te: ascolta chi descrive il simbolo e scegli tra le opzioni mostrate.');
+    }
+  }
+  return {
+    type: 'guess',
+    title: 'Lo Specchio dei Simboli',
+    instructions: 'Un solo membro della squadra vede il simbolo giusto e deve descriverlo a voce senza nominarlo. Gli altri scelgono tra le opzioni mostrate.',
+    boardKind: 'choice',
+    board: null,
+    choices,
+    clues,
+    solution: solutionIdx,
+  };
+}
+
+// Un solo giocatore conosce il punto esatto su una scala 0-100 e deve
+// guidare la squadra a voce ("più a destra", "quasi", "fermi") mentre
+// qualcun altro sposta la leva condivisa. Tolleranza di qualche punto:
+// serve tensione in tempo reale, non precisione chirurgica al pixel.
+function genTimeLever(numPlayers) {
+  const target = randInt(10, 90);
+  const guideIndex = randInt(0, numPlayers - 1);
+  const clues = [];
+  for (let i = 0; i < numPlayers; i++) {
+    if (i === guideIndex) {
+      clues.push(`Solo tu conosci il punto esatto: ${target} su una scala da 0 a 100. Guida la squadra a voce ("più a destra", "quasi", "fermi") mentre qualcuno sposta la leva.`);
+    } else {
+      clues.push('Nessun indizio per te: ascolta chi ti guida a voce e sposta la leva quando serve.');
+    }
+  }
+  return {
+    type: 'timeLever',
+    title: 'La Leva del Tempo',
+    instructions: 'Un solo membro della squadra conosce il punto esatto su una scala 0-100. Deve guidare gli altri a voce finché la leva non è abbastanza precisa.',
+    boardKind: 'sliderSlots',
+    board: [50],
+    choices: null,
+    clues,
+    solution: [target],
+    sliderMax: 100,
+    tolerance: 3,
+  };
 }
 
 function genWheels(numPlayers) {
@@ -249,6 +369,10 @@ const DOOR_GENERATORS = {
   wheels: genWheels,
   colors: genColors,
   toggles: genToggles,
+  missing: genMissingNumber,
+  operation: genOperation,
+  guess: genGuessSymbol,
+  timeLever: genTimeLever,
 };
 const DOOR_TYPES = Object.keys(DOOR_GENERATORS);
 
@@ -285,8 +409,12 @@ function checkBoardCorrect(door, board) {
     case 'number':
     case 'choice':
       return board === door.solution;
+    case 'sliderSlots': {
+      if (!Array.isArray(board) || board.length !== door.solution.length) return false;
+      const tol = door.tolerance || 0;
+      return board.every((v, i) => Math.abs(v - door.solution[i]) <= tol);
+    }
     case 'sequenceSlots':
-    case 'sliderSlots':
     case 'wheelSlots':
     case 'colorSlots':
       if (!Array.isArray(board) || board.length !== door.solution.length) return false;
@@ -321,7 +449,7 @@ function applyBoardUpdate(door, board, action) {
     case 'sliderSlots':
       if (!action || action.kind !== 'setSlot') return board;
       if (action.slot < 0 || action.slot >= b.length) return board;
-      b[action.slot] = clamp(Math.round(Number(action.value) || 0), 0, 10);
+      b[action.slot] = clamp(Math.round(Number(action.value) || 0), 0, door.sliderMax || 10);
       return b;
     case 'wheelSlots':
       if (!action || action.kind !== 'cycleSlot') return board;

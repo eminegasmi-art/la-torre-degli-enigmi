@@ -204,6 +204,8 @@
     font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.05rem; width: auto;
   }
   .choice-pill.selected { background: linear-gradient(180deg, var(--gold-light), var(--gold)); color: var(--ink); }
+  .choice-pill-icon { display: flex; align-items: center; justify-content: center; padding: 14px 18px; }
+  .choice-pill-icon .icon-svg { width: 26px; height: 26px; }
 
   .slots-board { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; width: 100%; }
   .slots-board.slots-slider { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
@@ -603,10 +605,14 @@
     } else if (door.boardKind === 'choice') {
       const wrap = document.createElement('div');
       wrap.className = 'choice-board';
+      const iconMode = door.type === 'guess';
       door.choices.forEach((c) => {
         const btn = document.createElement('button');
-        btn.className = 'choice-pill' + (door.board === c ? ' selected' : '');
-        btn.textContent = c;
+        btn.className = 'choice-pill' + (iconMode ? ' choice-pill-icon' : '') + (door.board === c ? ' selected' : '');
+        btn.type = 'button';
+        btn.dataset.value = c;
+        if (iconMode) btn.innerHTML = icon(WHEEL_SYMBOLS[c]);
+        else btn.textContent = c;
         btn.addEventListener('click', () => socket.emit('updateBoard', { kind: 'setChoice', value: c }));
         wrap.appendChild(btn);
       });
@@ -642,11 +648,11 @@
         slot.className = 'slot-slider';
         const label = document.createElement('div');
         label.className = 'slot-label';
-        label.textContent = `Leva ${i + 1}`;
+        label.textContent = door.type === 'timeLever' ? 'Precisione' : `Leva ${i + 1}`;
         const input = document.createElement('input');
         input.type = 'range';
         input.min = 0;
-        input.max = 10;
+        input.max = door.sliderMax || 10;
         input.step = 1;
         input.value = v;
         input.className = 'slot-range';
@@ -713,7 +719,7 @@
       if (input && document.activeElement !== input) input.value = door.board == null ? '' : door.board;
     } else if (door.boardKind === 'choice') {
       area.querySelectorAll('.choice-pill').forEach((btn) => {
-        btn.classList.toggle('selected', door.board === Number(btn.textContent));
+        btn.classList.toggle('selected', door.board === Number(btn.dataset.value));
       });
     } else if (door.boardKind === 'sequenceSlots') {
       area.querySelectorAll('.slot-input').forEach((input, i) => {
