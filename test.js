@@ -5,8 +5,20 @@ const {
   SPEED_BONUS_THRESHOLD_MS, SPEED_BONUS_MS, FINAL_DOOR_PENALTY_MULTIPLIER,
   DOOR_TYPES, WHEEL_SYMBOLS, COLORS,
   generateDoor, generateDoors, randomDoorPlan, checkBoardCorrect, applyBoardUpdate,
-  penaltyForAttempt, speedBonusFor,
+  penaltyForAttempt, speedBonusFor, numberRiddleClue, countSolutions,
 } = require('./gameLogic');
+
+// Riconosce i 4 formati prodotti da numberRiddleClue e ne ricalcola il valore:
+// serve a verificare (qui e nei test end-to-end sulla somma) che ogni indizio
+// "a calcolo" incorpori davvero il numero corretto, non solo che esista.
+function parseNumberRiddle(text) {
+  let m;
+  if ((m = text.match(/è (\d+) più (\d+)\./))) return Number(m[1]) + Number(m[2]);
+  if ((m = text.match(/è (\d+) meno (\d+)\./))) return Number(m[1]) - Number(m[2]);
+  if ((m = text.match(/è il doppio di (\d+)\./))) return Number(m[1]) * 2;
+  if ((m = text.match(/è (\d+) moltiplicato per (\d+)\./))) return Number(m[1]) * Number(m[2]);
+  throw new Error('Formato di indizio numerico non riconosciuto: ' + text);
+}
 
 let passed = 0;
 function check(desc, cond) {
@@ -27,11 +39,19 @@ for (const type of DOOR_TYPES) {
   }
 }
 
-// ---- sum: la soluzione è davvero la somma degli indizi --------------------
+// ---- numberRiddleClue: il "calcolo" nell'indizio incorpora SEMPRE il valore giusto ----
+for (let i = 0; i < 60; i++) {
+  const target = randIntForTest(2, 20);
+  const text = numberRiddleClue(target);
+  check(`numberRiddleClue: "${text}" corrisponde davvero a ${target}`, parseNumberRiddle(text) === target);
+}
+function randIntForTest(min, max) { return min + Math.floor(Math.random() * (max - min + 1)); }
+
+// ---- sum: la soluzione è davvero la somma dei numeri nascosti negli indizi-calcolo ----
 {
   const door = generateDoor('sum', 4);
-  const nums = door.clues.map((c) => Number(c.match(/\d+/)[0]));
-  check('sum: la soluzione è la somma dei numeri indicati negli indizi', nums.reduce((a, b) => a + b, 0) === door.solution);
+  const nums = door.clues.map((c) => parseNumberRiddle(c));
+  check('sum: la soluzione è la somma dei numeri nascosti negli indizi', nums.reduce((a, b) => a + b, 0) === door.solution);
 }
 
 // ---- sequence: la soluzione è l'ordinamento crescente dei numeri ----------
@@ -87,11 +107,24 @@ for (const numPlayers of [2, 3, 4, 6]) {
   });
 }
 
-// ---- levers/wheels/colors/toggles: board iniziale ha la lunghezza giusta e non è già risolto (salvo rara coincidenza) ----
+// ---- levers/wheels/colors/toggles: board iniziale, dominio della soluzione, E -----
+// unicità reale della soluzione rispetto agli indizi assegnati (il punto
+// centrale della riscrittura "usa il cervello": mai un enigma con più di una
+// soluzione possibile date le informazioni distribuite alla squadra).
+for (const numPlayers of [2, 3, 4, 6]) {
+  for (const type of ['levers', 'wheels', 'colors', 'toggles']) {
+    const door = generateDoor(type, numPlayers);
+    check(`${type}/${numPlayers}p: ha ${numPlayers} indizi (uno a testa)`, door.clues.length === numPlayers);
+    check(
+      `${type}/${numPlayers}p: gli indizi assegnati determinano UNA SOLA soluzione possibile (nessuna ambiguità)`,
+      countSolutions(numPlayers, door._testNumValues, door._testConstraints, 2) === 1
+    );
+  }
+}
 {
   const door = generateDoor('levers', 3);
   check('levers: 3 leve, tutte a 0 all\'inizio', JSON.stringify(door.board) === JSON.stringify([0, 0, 0]));
-  check('levers: la soluzione ha 3 valori tra 0 e 10', door.solution.every((v) => v >= 0 && v <= 10));
+  check('levers: la soluzione ha 3 valori tra 0 e sliderMax', door.solution.every((v) => v >= 0 && v <= door.sliderMax));
 }
 {
   const door = generateDoor('wheels', 3);
@@ -217,7 +250,7 @@ for (const numPlayers of [2, 3, 4, 6]) {
   const door = generateDoor('levers', 3);
   let board = door.board;
   board = applyBoardUpdate(door, board, { kind: 'setSlot', slot: 1, value: 15 });
-  check('levers: setSlot rispetta il limite massimo (10)', board[1] === 10);
+  check('levers: setSlot rispetta il limite massimo (door.sliderMax)', board[1] === door.sliderMax);
   board = applyBoardUpdate(door, board, { kind: 'setSlot', slot: 1, value: -5 });
   check('levers: setSlot rispetta il limite minimo (0)', board[1] === 0);
   board = applyBoardUpdate(door, board, { kind: 'setSlot', slot: 99, value: 5 });

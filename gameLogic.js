@@ -86,17 +86,36 @@ function speedBonusFor(elapsedMs, isFinalDoor) {
 
 // ---- Generatori dei singoli tipi di porta --------------------------------
 
+// Invece di dire il numero direttamente, lo si nasconde in un piccolo calcolo:
+// resta deducibile con ASSOLUTA certezza (è solo aritmetica), ma richiede
+// un primo passo mentale a ciascuno prima ancora di parlare con gli altri.
+function numberRiddleClue(target) {
+  const templates = [];
+  const a1 = randInt(1, Math.max(1, target - 1));
+  templates.push(`Il tuo numero segreto è ${a1} più ${target - a1}.`);
+  const extra = randInt(1, 10);
+  templates.push(`Il tuo numero segreto è ${target + extra} meno ${extra}.`);
+  if (target % 2 === 0) templates.push(`Il tuo numero segreto è il doppio di ${target / 2}.`);
+  for (const f of [2, 3, 4, 5]) {
+    if (target % f === 0 && target / f !== target) {
+      templates.push(`Il tuo numero segreto è ${f} moltiplicato per ${target / f}.`);
+      break;
+    }
+  }
+  return sample(templates, 1)[0];
+}
+
 function genSumSecret(numPlayers) {
   const nums = Array.from({ length: numPlayers }, () => randInt(2, 20));
   const solution = nums.reduce((a, b) => a + b, 0);
   return {
     type: 'sum',
     title: 'La Serratura dei Numeri',
-    instructions: 'Ogni membro della squadra conosce un numero segreto. Sommateli tutti e inserite il totale.',
+    instructions: 'Ogni membro della squadra conosce un piccolo calcolo che nasconde un numero segreto. Risolvetelo, sommate tutti i numeri della squadra e inserite il totale.',
     boardKind: 'number',
     board: null,
     choices: null,
-    clues: nums.map((n) => `Il tuo numero segreto è ${n}.`),
+    clues: nums.map((n) => numberRiddleClue(n)),
     solution,
   };
 }
@@ -205,13 +224,167 @@ function genLiarClue(numPlayers) {
   };
 }
 
-// Generatore generico per i 4 enigmi a "conoscenza divisa": un valore per
-// slot, un giocatore per slot, chiunque può modificare qualsiasi slot sul
-// board condiviso.
-function genSplitKnowledge(numPlayers, config) {
-  const solution = Array.from({ length: numPlayers }, (_, i) => config.solutionGen(i));
-  const clues = solution.map((v, i) => config.labelFn(i, v));
-  return {
+// ---- Motore a vincoli per gli enigmi "a conoscenza divisa" ---------------
+// In passato ogni giocatore riceveva semplicemente il valore esatto della
+// propria casella/ruota/leva/interruttore: bastava dettarlo a voce, zero
+// deduzione reale. Ora invece la squadra riceve indizi RELAZIONALI
+// (uguaglianze, differenze, esclusioni, conteggi...) che vanno incrociati
+// parlando per dedurre la soluzione: la generazione verifica sempre - per
+// forza bruta, lo spazio di ricerca è piccolo - che l'insieme di indizi
+// assegnato determini UNA SOLA soluzione possibile, mai ambigua (stesso
+// principio "deducibile con certezza" delle altre porte).
+
+// Conta (fino a `cap`, ci basta sapere se è 0, 1 o "più di 1") quante
+// assegnazioni in [0,numValues)^numSlots soddisfano tutti i constraints.
+// Pruning: appena una posizione è assegnata, si verificano subito i vincoli
+// che dipendono solo da posizioni già note (deps), scartando i rami non
+// validi il prima possibile invece di aspettare la foglia.
+function countSolutions(numSlots, numValues, constraints, cap) {
+  const byMaxDep = Array.from({ length: numSlots }, () => []);
+  constraints.forEach((c) => {
+    const maxDep = c.deps && c.deps.length ? Math.max(...c.deps) : numSlots - 1;
+    byMaxDep[Math.min(maxDep, numSlots - 1)].push(c);
+  });
+  let count = 0;
+  const assignment = new Array(numSlots).fill(0);
+  function rec(pos) {
+    if (count >= cap) return;
+    if (pos === numSlots) { count++; return; }
+    for (let v = 0; v < numValues; v++) {
+      assignment[pos] = v;
+      if (byMaxDep[pos].every((c) => c.test(assignment))) rec(pos + 1);
+      if (count >= cap) return;
+    }
+  }
+  rec(0);
+  return count;
+}
+
+function valueLabel(kind, v) {
+  if (kind === 'colors') return COLORS[v].label;
+  if (kind === 'wheels') return WHEEL_SYMBOLS[v].label;
+  if (kind === 'toggles') return v ? 'ACCESO' : 'SPENTO';
+  return String(v);
+}
+
+// Costruisce il "pool" di affermazioni VERE sulla soluzione `sol` (nota solo
+// alla generazione, mai al client): coppie di uguaglianza/differenza/ordine,
+// conteggi globali, e infine i vincoli "diretti" (il vecchio comportamento)
+// usati solo come ultima risorsa per garantire l'unicità. Si preferiscono
+// vincoli "forti" (che scartano molte possibilità) a quelli deboli tipo
+// "non è questo singolo valore": con domini grandi (le leve, 9 valori) un
+// indizio debole da solo non basta a nulla e finiva per gonfiare a dismisura
+// il numero di indizi necessari - qui si evita alla radice.
+function buildConstraintPool(sol, numValues, kind) {
+  const n = sol.length;
+  const relational = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (sol[i] === sol[j]) {
+        const text = kind === 'toggles'
+          ? `Gli interruttori ${i + 1} e ${j + 1} devono essere nello stesso stato (entrambi accesi o entrambi spenti).`
+          : kind === 'levers'
+          ? `Le leve ${i + 1} e ${j + 1} devono arrivare allo stesso valore.`
+          : kind === 'wheels'
+          ? `Le ruote ${i + 1} e ${j + 1} devono mostrare lo stesso simbolo.`
+          : `Le caselle ${i + 1} e ${j + 1} devono avere lo stesso colore.`;
+        relational.push({ text, deps: [i, j], test: (a) => a[i] === a[j] });
+      } else if (kind === 'levers') {
+        // Per domini numerici grandi, "diverso" da solo è troppo debole:
+        // si usano solo confronto d'ordine e somma, molto più discriminanti.
+        if (sol[i] > sol[j]) relational.push({ text: `La leva ${i + 1} deve arrivare più in alto della leva ${j + 1}.`, deps: [i, j], test: (a) => a[i] > a[j] });
+        else relational.push({ text: `La leva ${j + 1} deve arrivare più in alto della leva ${i + 1}.`, deps: [i, j], test: (a) => a[j] > a[i] });
+        const s = sol[i] + sol[j];
+        relational.push({ text: `La somma dei valori delle leve ${i + 1} e ${j + 1} deve essere ${s}.`, deps: [i, j], test: (a) => a[i] + a[j] === s });
+      } else {
+        const text = kind === 'toggles'
+          ? `Tra gli interruttori ${i + 1} e ${j + 1}, uno deve essere acceso e l'altro spento.`
+          : kind === 'wheels'
+          ? `Le ruote ${i + 1} e ${j + 1} devono mostrare simboli diversi tra loro.`
+          : `Le caselle ${i + 1} e ${j + 1} devono avere colori diversi tra loro.`;
+        relational.push({ text, deps: [i, j], test: (a) => a[i] !== a[j] });
+      }
+    }
+  }
+  if (kind === 'colors' || kind === 'wheels') {
+    [...new Set(sol)].forEach((v) => {
+      const k = sol.filter((x) => x === v).length;
+      const text = kind === 'wheels'
+        ? (k === 1
+          ? `In totale, esattamente 1 ruota deve mostrare il simbolo ${valueLabel(kind, v)}.`
+          : `In totale, esattamente ${k} ruote devono mostrare il simbolo ${valueLabel(kind, v)}.`)
+        : (k === 1
+          ? `In totale, esattamente 1 casella deve avere il colore ${valueLabel(kind, v)}.`
+          : `In totale, esattamente ${k} caselle devono avere il colore ${valueLabel(kind, v)}.`);
+      relational.push({ text, test: (a) => a.filter((x) => x === v).length === k });
+    });
+  }
+  if (kind === 'toggles') {
+    const k = sol.filter(Boolean).length;
+    const text = k === 0
+      ? 'In totale, nessun interruttore deve essere ACCESO.'
+      : k === 1
+      ? 'In totale, esattamente 1 interruttore deve essere ACCESO.'
+      : `In totale, esattamente ${k} interruttori devono essere ACCESI.`;
+    relational.push({ text, test: (a) => a.filter(Boolean).length === k });
+  }
+  const directs = [];
+  for (let i = 0; i < n; i++) {
+    const text = kind === 'levers'
+      ? `La leva ${i + 1} deve arrivare a ${sol[i]}.`
+      : kind === 'wheels'
+      ? `La ruota ${i + 1} deve mostrare: ${valueLabel(kind, sol[i])}.`
+      : kind === 'toggles'
+      ? `L'interruttore ${i + 1} deve essere ${valueLabel(kind, sol[i])}.`
+      : `La casella ${i + 1} deve essere ${valueLabel(kind, sol[i])}.`;
+    directs.push({ text, deps: [i], test: (a) => a[i] === sol[i] });
+  }
+  return { relational, directs };
+}
+
+// Scegli greedy un sottoinsieme di vincoli che determina la soluzione in modo
+// univoco: prova prima quelli relazionali (in ordine casuale), e solo se non
+// bastano ricorre ai "diretti" uno a uno finché la soluzione non è unica
+// (nel caso limite, con tutti i diretti presenti l'unicità è garantita).
+function pickConstraints(sol, numValues, kind, numPlayers) {
+  const n = sol.length;
+  const { relational, directs } = buildConstraintPool(sol, numValues, kind);
+  const relShuffled = shuffle(relational);
+  const dirShuffled = shuffle(directs);
+  const chosen = [];
+  const isUnique = () => countSolutions(n, numValues, chosen, 2) === 1;
+  for (const c of relShuffled) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  for (const c of dirShuffled) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  // Se restano giocatori senza nemmeno un indizio proprio, aggiungi altri
+  // vincoli veri (anche ridondanti) dal pool: nessuno resta fuori dalla
+  // discussione se è evitabile.
+  if (chosen.length < numPlayers) {
+    const used = new Set(chosen);
+    for (const c of [...relShuffled, ...dirShuffled]) {
+      if (chosen.length >= numPlayers) break;
+      if (!used.has(c)) chosen.push(c);
+    }
+  }
+  return chosen;
+}
+
+function distributeClueTexts(chosen, numPlayers) {
+  const buckets = Array.from({ length: numPlayers }, () => []);
+  chosen.forEach((c, idx) => buckets[idx % numPlayers].push(c.text));
+  return buckets.map((b) => (b.length ? b.join(' · ') : 'Nessun indizio diretto per te: ascolta gli altri, i loro indizi bastano a dedurre anche la tua parte.'));
+}
+
+function genConstraintDoor(numPlayers, kind, config) {
+  const sol = Array.from({ length: numPlayers }, () => randInt(0, config.numValues - 1));
+  const chosen = pickConstraints(sol, config.numValues, kind, numPlayers);
+  const clues = distributeClueTexts(chosen, numPlayers);
+  const door = {
     type: config.type,
     title: config.title,
     instructions: config.instructions,
@@ -219,22 +392,26 @@ function genSplitKnowledge(numPlayers, config) {
     board: Array(numPlayers).fill(config.initialSlotValue),
     choices: null,
     clues,
-    solution,
+    solution: kind === 'toggles' ? sol.map(Boolean) : sol,
   };
+  // Solo per i test automatici (node test.js): mai incluso nei campi che il
+  // server invia ai client (vedi la whitelist in server.js).
+  door._testConstraints = chosen;
+  door._testNumValues = config.numValues;
+  if (config.sliderMax) door.sliderMax = config.sliderMax;
+  return door;
 }
 
 function genLevers(numPlayers) {
-  const door = genSplitKnowledge(numPlayers, {
+  return genConstraintDoor(numPlayers, 'levers', {
     type: 'levers',
     title: 'Le Leve del Meccanismo',
-    instructions: 'Ogni leva ha un valore corretto da 0 a 10, noto a un solo membro della squadra. Portate ogni leva al valore giusto.',
+    instructions: 'Ogni leva ha un valore corretto da 0 a 8, ma nessuno lo conosce direttamente: incrociate a voce gli indizi (confronti, somme, esclusioni...) per dedurre il valore di ognuna, poi portatela lì.',
     boardKind: 'sliderSlots',
     initialSlotValue: 0,
-    solutionGen: () => randInt(0, 10),
-    labelFn: (i, v) => `La leva numero ${i + 1} deve arrivare a ${v}.`,
+    numValues: 9,
+    sliderMax: 8,
   });
-  door.sliderMax = 10;
-  return door;
 }
 
 // La sequenza segue un passo costante (crescente); manca un valore, e ogni
@@ -382,38 +559,35 @@ function genTimeLever(numPlayers) {
 }
 
 function genWheels(numPlayers) {
-  return genSplitKnowledge(numPlayers, {
+  return genConstraintDoor(numPlayers, 'wheels', {
     type: 'wheels',
     title: 'Le Rune Girevoli',
-    instructions: 'Ogni ruota ha un simbolo corretto. Toccatele per farle girare fino al simbolo giusto.',
+    instructions: 'Ogni ruota ha un simbolo corretto, ma nessuno lo conosce direttamente: incrociate a voce gli indizi (uguaglianze, esclusioni, conteggi...) per dedurre il simbolo di ognuna, poi toccatele per farle girare.',
     boardKind: 'wheelSlots',
     initialSlotValue: 0,
-    solutionGen: () => randInt(0, WHEEL_SYMBOLS.length - 1),
-    labelFn: (i, v) => `La ruota numero ${i + 1} deve mostrare: ${WHEEL_SYMBOLS[v].label}.`,
+    numValues: WHEEL_SYMBOLS.length,
   });
 }
 
 function genColors(numPlayers) {
-  return genSplitKnowledge(numPlayers, {
+  return genConstraintDoor(numPlayers, 'colors', {
     type: 'colors',
     title: 'Il Quadro dei Colori',
-    instructions: 'Ogni casella ha un colore corretto. Toccatele per cambiarne il colore.',
+    instructions: 'Ogni casella ha un colore corretto, ma nessuno lo conosce direttamente: incrociate a voce gli indizi (uguaglianze, esclusioni, conteggi...) per dedurre il colore di ognuna, poi toccatele per cambiarlo.',
     boardKind: 'colorSlots',
     initialSlotValue: 0,
-    solutionGen: () => randInt(0, COLORS.length - 1),
-    labelFn: (i, v) => `La casella numero ${i + 1} deve diventare: ${COLORS[v].label}.`,
+    numValues: COLORS.length,
   });
 }
 
 function genToggles(numPlayers) {
-  return genSplitKnowledge(numPlayers, {
+  return genConstraintDoor(numPlayers, 'toggles', {
     type: 'toggles',
     title: 'Gli Interruttori del Sigillo',
-    instructions: "Ogni interruttore ha uno stato corretto. Toccateli per accenderli o spegnerli.",
+    instructions: "Ogni interruttore ha uno stato corretto, ma nessuno lo conosce direttamente: incrociate a voce gli indizi (uguaglianze, conteggi...) per dedurre quali vanno accesi, poi toccateli.",
     boardKind: 'toggleSlots',
     initialSlotValue: false,
-    solutionGen: () => Math.random() < 0.5,
-    labelFn: (i, v) => `L'interruttore numero ${i + 1} deve essere ${v ? 'ACCESO' : 'SPENTO'}.`,
+    numValues: 2,
   });
 }
 
@@ -552,4 +726,6 @@ module.exports = {
   applyBoardUpdate,
   penaltyForAttempt,
   speedBonusFor,
+  numberRiddleClue,
+  countSolutions,
 };
