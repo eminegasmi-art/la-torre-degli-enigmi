@@ -60,8 +60,8 @@ const COLORS = [
 ];
 
 // ---- Parametri di partita -------------------------------------------------
-const DOOR_COUNT = 5;
-const TOTAL_TIME_MS = 8 * 60 * 1000; // 8 minuti totali per l'intera torre
+const DOOR_COUNT = 10;
+const TOTAL_TIME_MS = 12 * 60 * 1000; // 12 minuti totali per l'intera torre
 const PENALTY_MS = 20 * 1000; // penalità per ogni tentativo errato
 
 // ---- Generatori dei singoli tipi di porta --------------------------------

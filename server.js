@@ -34,6 +34,7 @@ function publicDoorView(door) {
     boardKind: door.boardKind,
     board: door.board,
     choices: door.choices,
+    sliderMax: door.sliderMax,
   };
 }
 
