@@ -96,68 +96,76 @@ function genBrokenSequence(numPlayers) {
   };
 }
 
+// Il numero segreto ha tante CIFRE quanti sono i giocatori: ognuno conosce
+// una cifra e la sua posizione. Combinandole (parlando) si ricostruisce il
+// numero con certezza assoluta - niente più indizi vaghi tipo "maggiore di
+// N" che da soli non bastano a determinare un numero preciso. La difficoltà
+// scala naturalmente col numero di giocatori (più giocatori = più cifre).
 function genPoeticClues(numPlayers) {
-  const X = randInt(10, 80);
-  const candidates = [];
-  candidates.push(X % 2 === 0 ? 'Il numero è pari.' : 'Il numero è dispari.');
-  for (let k = 0; k < 3; k++) {
-    const below = X - randInt(1, Math.max(1, X - 1));
-    if (below >= 0) candidates.push(`Il numero è maggiore di ${below}.`);
-  }
-  for (let k = 0; k < 3; k++) {
-    const above = X + randInt(1, 30);
-    candidates.push(`Il numero è minore di ${above}.`);
-  }
-  if (X % 2 === 0) candidates.push(`Il numero è il doppio di ${X / 2}.`);
-  if (X * 2 <= 99) candidates.push(`Il numero è la metà di ${X * 2}.`);
-  const digitSum = String(X).split('').reduce((a, d) => a + Number(d), 0);
-  candidates.push(`La somma delle sue cifre è ${digitSum}.`);
-  [2, 3, 5, 7].forEach((d) => {
-    if (X % d === 0) candidates.push(`Il numero è divisibile per ${d}.`);
-  });
-  const unique = Array.from(new Set(candidates));
-  const chosen = sample(unique, Math.min(numPlayers, unique.length));
-  while (chosen.length < numPlayers) chosen.push('Il numero è compreso tra 1 e 99.');
+  const numDigits = clamp(numPlayers, 2, 6);
+  const digits = [randInt(1, 9)]; // la prima cifra non è mai 0
+  for (let i = 1; i < numDigits; i++) digits.push(randInt(0, 9));
+  const solution = Number(digits.join(''));
+  const clues = digits.map((d, i) => `La tua cifra segreta è ${d}, in posizione ${i + 1} da sinistra (il numero ha ${numDigits} cifre in totale).`);
   return {
     type: 'poetic',
     title: 'Il Sussurro dei Numeri',
-    instructions: 'Ognuno conosce un indizio vero su un numero segreto. Combinateli a voce e inserite il numero.',
+    instructions: `Ogni membro della squadra conosce una cifra del numero segreto e la sua posizione. Il numero ha ${numDigits} cifre: ricostruitelo insieme e inseritelo.`,
     boardKind: 'number',
     board: null,
     choices: null,
-    clues: chosen,
-    solution: X,
+    clues,
+    solution,
   };
-}
-
-function clueAbout(n) {
-  const opts = [
-    `Il numero è ${n % 2 === 0 ? 'pari' : 'dispari'}.`,
-    `Il numero è maggiore di ${Math.max(0, n - randInt(3, 15))}.`,
-    `Il numero è minore di ${n + randInt(3, 15)}.`,
-  ];
-  return opts[randInt(0, opts.length - 1)];
 }
 
 function genLiarClue(numPlayers) {
   const X = randInt(10, 80);
   let decoys = uniqueRandomInts(6, 10, 80).filter((d) => d !== X).slice(0, 3);
-  while (decoys.length < 3) decoys.push(randInt(10, 80));
+  while (decoys.length < 3) {
+    const d = randInt(10, 80);
+    if (d !== X && !decoys.includes(d)) decoys.push(d);
+  }
   const choices = shuffle([X, ...decoys]);
+  const sorted = [...choices].sort((a, b) => a - b);
+
+  // Indizi costruiti sulle soglie ESATTE delle 4 opzioni mostrate: così ogni
+  // indizio distingue davvero almeno un'opzione dalle altre, invece di
+  // soglie casuali che potrebbero non escludere nessuno (il bug segnalato).
+  const templates = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const t = sorted[i];
+    templates.push({ text: `Il numero è maggiore di ${t}.`, test: (n) => n > t });
+  }
+  for (let i = 1; i < sorted.length; i++) {
+    const t = sorted[i];
+    templates.push({ text: `Il numero è minore di ${t}.`, test: (n) => n < t });
+  }
+  templates.push({ text: 'Il numero è pari.', test: (n) => n % 2 === 0 });
+  templates.push({ text: 'Il numero è dispari.', test: (n) => n % 2 === 1 });
+  const discriminating = templates.filter((t) => {
+    const vals = choices.map((c) => t.test(c));
+    return vals.some((v) => v) && vals.some((v) => !v);
+  });
+
   const liarIndex = randInt(0, numPlayers - 1);
   const clues = [];
   for (let i = 0; i < numPlayers; i++) {
     if (i === liarIndex) {
       const decoy = decoys[randInt(0, decoys.length - 1)];
-      clues.push(clueAbout(decoy));
+      const valid = discriminating.filter((t) => t.test(decoy) && !t.test(X));
+      const pool = valid.length ? valid : discriminating;
+      clues.push(pool[randInt(0, pool.length - 1)].text);
     } else {
-      clues.push(clueAbout(X));
+      const valid = discriminating.filter((t) => t.test(X));
+      const pool = valid.length ? valid : discriminating;
+      clues.push(pool[randInt(0, pool.length - 1)].text);
     }
   }
   return {
     type: 'liar',
     title: 'La Porta del Bugiardo',
-    instructions: "Ognuno ha un indizio sul numero segreto, ma UNO degli indizi è falso. Scoprite il numero vero tra le quattro opzioni.",
+    instructions: "Ognuno ha un indizio sul numero segreto, ma UNO degli indizi è falso. Confrontateli e scoprite qual è il numero vero tra le quattro opzioni.",
     boardKind: 'choice',
     board: null,
     choices,
@@ -297,7 +305,10 @@ function applyBoardUpdate(door, board, action) {
   switch (door.boardKind) {
     case 'number':
       if (!action || action.kind !== 'setNumber') return board;
-      return clamp(Math.round(Number(action.value) || 0), 0, 999);
+      // Il campo "number" è condiviso da più enigmi: la somma segreta resta
+      // piccola, ma "Il Sussurro dei Numeri" può arrivare a un numero di 6
+      // cifre con 6 giocatori (999999), quindi il limite dev'essere ampio.
+      return clamp(Math.round(Number(action.value) || 0), 0, 999999);
     case 'choice':
       if (!action || action.kind !== 'setChoice') return board;
       if (!door.choices.includes(action.value)) return board;
