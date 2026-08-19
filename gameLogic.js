@@ -130,6 +130,41 @@ function countPermutations(n, constraints, cap) {
   return count;
 }
 
+// Conta (fino a `cap`) quanti "accoppiamenti perfetti" (partizioni in coppie)
+// di n elementi (n pari) soddisfano tutti i constraints: usata per Il
+// Mosaico ad Abbinamento. Non si può riusare countSolutions perché lì
+// l'etichetta di un "valore di gruppo" sarebbe arbitraria - la stessa coppia
+// verrebbe contata più volte con etichette diverse, falsando il controllo di
+// unicità. Qui si enumera direttamente lo spazio dei possibili "partner".
+function countMatchings(n, constraints, cap) {
+  let count = 0;
+  const partner = new Array(n).fill(-1);
+  function rec() {
+    if (count >= cap) return;
+    let i = 0;
+    while (i < n && partner[i] !== -1) i++;
+    if (i === n) {
+      // Assegnazione completa: solo ora ha senso valutare i constraints,
+      // che possono riferirsi a coppie di indici qualsiasi (a differenza di
+      // countSolutions/countPermutations non c'e' un ordine di riempimento
+      // "progressivo" su cui fare pruning parziale in modo affidabile).
+      if (constraints.every((c) => c.test(partner))) count++;
+      return;
+    }
+    for (let j = i + 1; j < n; j++) {
+      if (partner[j] !== -1) continue;
+      partner[i] = j;
+      partner[j] = i;
+      rec();
+      partner[i] = -1;
+      partner[j] = -1;
+      if (count >= cap) return;
+    }
+  }
+  rec();
+  return count;
+}
+
 // Ogni giocatore ha un oggetto di peso diverso (una classifica nascosta, non
 // un valore assoluto). Gli indizi sono confronti a coppie ("il tuo pesa più
 // di quello del Giocatore 3") che la squadra deve incrociare a voce per
@@ -600,30 +635,188 @@ function genDomino(numPlayers) {
   return door;
 }
 
-// Stesso meccanismo affidabile de "Il Numero Mancante" (un passo costante,
-// sempre deducibile con certezza), ma con ambientazione da mappa del tesoro
-// e resa visiva a strisce di pergamena strappata sul client (vedi `cells`).
-function genTornMap(numPlayers) {
-  const L = numPlayers + 1;
-  const start = randInt(5, 20);
-  const step = randInt(2, 9);
-  const terms = Array.from({ length: L }, (_, i) => start + i * step);
-  const missingIndex = randInt(0, L - 1);
-  const solution = terms[missingIndex];
-  const knownPositions = terms.map((_, i) => i).filter((i) => i !== missingIndex);
-  const clues = knownPositions.map((pos) => `Il tuo frammento di pergamena mostra: alla tappa ${pos + 1} del cammino, la distanza segnata è ${terms[pos]} leghe.`);
-  const cells = terms.map((v, i) => ({ pos: i + 1, value: i === missingIndex ? null : v, missing: i === missingIndex }));
-  return {
-    type: 'map',
-    title: 'La Mappa Strappata',
-    instructions: `Un'antica mappa segna ${L} tappe di un cammino, con una distanza regolare tra una tappa e la successiva (sempre lo stesso passo). Un frammento è andato perso: deducete il passo e ricostruite la distanza mancante alla tappa ${missingIndex + 1}.`,
-    boardKind: 'number',
-    board: null,
+// ---- v2.2: tre enigmi nuovi, pensati per essere FISICAMENTE interattivi
+// (tocchi in un ordine, tocchi a tempo, tocchi per collegare) invece che
+// "leggi indizi -> scrivi un numero". "La Mappa Strappata" (un solo passo
+// aritmetico costante, zero motore a vincoli) è stata ritirata perché era
+// rimasta l'unico enigma davvero meccanico dopo la revisione v2.1 - stesso
+// giudizio già dato in passato al vecchio "Numero Mancante".
+
+// "Il Sentiero a Tappe": stessa deduzione della Bilancia degli Antenati
+// (confronti a coppie per ricostruire un ordinamento, countPermutations),
+// ma l'azione finale è FISICA: invece di scrivere un numero in una casella,
+// la squadra tocca le rune nell'ordine dedotto, una alla volta - più
+// tattile, con margine di errore reale (si può sbagliare e ricominciare).
+function genTapSequence(numPlayers) {
+  const n = numPlayers;
+  const rank = shuffle(Array.from({ length: n }, (_, i) => i)); // rank[i] = posizione (0=prima) in cui va toccata la runa del giocatore i
+  const pairs = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) pairs.push([i, j]);
+  const shuffledPairs = shuffle(pairs);
+  const cluesByPlayer = Array.from({ length: n }, () => []);
+  const chosen = [];
+  const isUnique = () => countPermutations(n, chosen, 2) === 1;
+  for (const [i, j] of shuffledPairs) {
+    if (isUnique()) break;
+    const iBefore = rank[i] < rank[j];
+    chosen.push({ deps: [Math.max(i, j)], test: (p) => (iBefore ? p[i] < p[j] : p[i] > p[j]) });
+    cluesByPlayer[i].push(`La tua runa va toccata ${iBefore ? 'PRIMA' : 'DOPO'} di quella del Giocatore ${j + 1}.`);
+    cluesByPlayer[j].push(`La tua runa va toccata ${iBefore ? 'DOPO' : 'PRIMA'} di quella del Giocatore ${i + 1}.`);
+  }
+  let gi = 0;
+  const directOrder = shuffle(Array.from({ length: n }, (_, i) => i));
+  while (!isUnique() && gi < n) {
+    const i = directOrder[gi++];
+    chosen.push({ deps: [i], test: (p) => p[i] === rank[i] });
+    cluesByPlayer[i].push(`La tua runa è la ${ORDINALS_IT[rank[i]] || rank[i] + 1 + 'ª'} da toccare.`);
+  }
+  for (const [i, j] of shuffledPairs) {
+    if (cluesByPlayer.every((c) => c.length > 0)) break;
+    if (cluesByPlayer[i].length === 0) {
+      const iBefore = rank[i] < rank[j];
+      cluesByPlayer[i].push(`La tua runa va toccata ${iBefore ? 'PRIMA' : 'DOPO'} di quella del Giocatore ${j + 1}.`);
+    }
+  }
+  const clues = cluesByPlayer.map((c) => (c.length ? c.join(' · ') : 'Nessun confronto diretto per te: ascolta gli altri per dedurre la posizione della tua runa.'));
+  const order = new Array(n);
+  rank.forEach((r, i) => { order[r] = i; }); // order[posizione di tap] = indice del giocatore/runa da toccare in quella posizione
+  const door = {
+    type: 'tapSequence',
+    title: 'Il Sentiero a Tappe',
+    instructions: 'Ogni runa appartiene a un giocatore diverso. Nessuno conosce l\'intero ordine: incrociate a voce gli indizi (chi va prima/dopo di chi) per dedurre l\'ordine ESATTO, poi toccate le rune in fila in quell\'ordine. Se sbagliate potete ricominciare con "Ricomincia".',
+    boardKind: 'tapSequence',
+    board: [],
     choices: null,
-    cells,
     clues,
-    solution,
+    solution: order,
+    needsRoster: true,
   };
+  door._testConstraints = chosen;
+  return door;
+}
+
+// "Il Rituale a Tempo": ogni giocatore deve premere la propria runa
+// esattamente al battito dedotto dagli indizi (stesso motore a vincoli
+// relazionali di leve/numeri), MENTRE un battito visivo condiviso scorre in
+// tempo reale sullo schermo di tutti - alla deduzione verbale si aggiunge
+// una fase di esecuzione fisica sotto pressione, con un margine di errore
+// umano tollerato (tolerance).
+const RITUAL_BEAT_RANGE = 8; // battiti possibili nella deduzione: 0..7
+const RITUAL_TOLERANCE = 1; // margine di errore umano sul tempismo di tocco
+
+function genRitualBeat(numPlayers) {
+  const n = numPlayers;
+  const sol = Array.from({ length: n }, () => randInt(0, RITUAL_BEAT_RANGE - 1));
+  const pool = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (sol[i] === sol[j]) {
+        pool.push({ text: `Il Giocatore ${i + 1} e il Giocatore ${j + 1} devono premere allo STESSO battito.`, deps: [i, j], test: (a) => a[i] === a[j] });
+      } else if (sol[i] > sol[j]) {
+        pool.push({ text: `Il Giocatore ${i + 1} deve premere DOPO il Giocatore ${j + 1} (battito più alto).`, deps: [i, j], test: (a) => a[i] > a[j] });
+      } else {
+        pool.push({ text: `Il Giocatore ${j + 1} deve premere DOPO il Giocatore ${i + 1} (battito più alto).`, deps: [i, j], test: (a) => a[j] > a[i] });
+      }
+    }
+    pool.push({ text: `Il Giocatore ${i + 1} deve premere a un battito ${sol[i] % 2 === 0 ? 'PARI' : 'DISPARI'}.`, deps: [i], test: (a) => (a[i] % 2 === 0) === (sol[i] % 2 === 0) });
+  }
+  const directs = sol.map((v, i) => ({ text: `Il Giocatore ${i + 1} deve premere esattamente al battito ${v}.`, deps: [i], test: (a) => a[i] === v }));
+  const shuffledPool = shuffle(pool);
+  const chosen = [];
+  const isUnique = () => countSolutions(n, RITUAL_BEAT_RANGE, chosen, 2) === 1;
+  for (const c of shuffledPool) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  for (const c of shuffle(directs)) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  if (chosen.length < n) {
+    const used = new Set(chosen);
+    for (const c of [...shuffledPool, ...directs]) {
+      if (chosen.length >= n) break;
+      if (!used.has(c)) chosen.push(c);
+    }
+  }
+  const clues = distributeClueTexts(chosen, n);
+  const door = {
+    type: 'ritual',
+    title: 'Il Rituale a Tempo',
+    instructions: `Un battito magico scandisce il ritmo sul board (0, 1, 2, 3...). Ogni giocatore deve premere la propria runa ESATTAMENTE al battito corretto, ma nessuno lo conosce direttamente: incrociate a voce gli indizi (confronti, pari/dispari...) per dedurre il battito di ognuno, poi state pronti a premere al momento giusto (un margine di ${RITUAL_TOLERANCE} battito è tollerato).`,
+    boardKind: 'pulseSlots',
+    board: Array(n).fill(null),
+    choices: null,
+    clues,
+    solution: sol,
+    tolerance: RITUAL_TOLERANCE,
+    needsRoster: true,
+  };
+  door._testConstraints = chosen;
+  door._testNumValues = RITUAL_BEAT_RANGE;
+  return door;
+}
+
+// "Il Mosaico ad Abbinamento": 6 rune fisse (indipendenti dal numero di
+// giocatori, come Lo Specchio dei Simboli) formano 3 coppie nascoste. Ogni
+// giocatore riceve un frammento di conoscenza distribuita (quali rune sono
+// o non sono la stessa coppia): nessuno ha il quadro completo, la squadra
+// deve incrociare a voce i frammenti e poi COLLEGARE le rune sul board
+// toccando prima l'una poi l'altra (ritocca la stessa per deselezionarla).
+// Nota tecnica: il campo pubblico "choices" (già whitelisted lato server
+// per La Porta del Bugiardo) viene riusato per trasportare l'ordine delle
+// rune mostrate sul board, così non serve aggiungere un nuovo campo alla
+// whitelist di server.js per questo enigma.
+const MOSAIC_SLOT_COUNT = 6; // = WHEEL_SYMBOLS.length: ogni runa è distinta, nessuna scorciatoia visiva
+
+function genMosaic(numPlayers) {
+  const n = MOSAIC_SLOT_COUNT;
+  const symbolOrder = shuffle(Array.from({ length: n }, (_, i) => i)); // symbolOrder[slot] = indice in WHEEL_SYMBOLS mostrato in quello slot
+  let remaining = shuffle(Array.from({ length: n }, (_, i) => i));
+  const partner = new Array(n).fill(-1);
+  while (remaining.length) {
+    const a = remaining.pop();
+    const b = remaining.pop();
+    partner[a] = b;
+    partner[b] = a;
+  }
+  const pool = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const si = WHEEL_SYMBOLS[symbolOrder[i]].label;
+      const sj = WHEEL_SYMBOLS[symbolOrder[j]].label;
+      if (partner[i] === j) {
+        pool.push({ text: `Le rune ${si} e ${sj} sono la STESSA coppia.`, test: (p) => p[i] === j });
+      } else {
+        pool.push({ text: `Le rune ${si} e ${sj} NON sono la stessa coppia.`, test: (p) => p[i] !== j });
+      }
+    }
+  }
+  const shuffledPool = shuffle(pool);
+  const chosen = [];
+  const isUnique = () => countMatchings(n, chosen, 2) === 1;
+  for (const c of shuffledPool) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  if (!isUnique()) {
+    // Rete di sicurezza (non dovrebbe mai servire con n=6): aggiungi tutto
+    // il pool rimasto piuttosto che consegnare un enigma ambiguo.
+    for (const c of shuffledPool) { if (!chosen.includes(c)) chosen.push(c); }
+  }
+  const clues = distributeClueTexts(chosen, numPlayers);
+  const door = {
+    type: 'mosaic',
+    title: 'Il Mosaico ad Abbinamento',
+    instructions: `Sul board ci sono ${n} rune, che formano ${n / 2} coppie nascoste. Nessuno conosce tutte le coppie: incrociate a voce i vostri frammenti (quali rune sono o non sono la stessa coppia) per dedurre l'abbinamento completo, poi toccate due rune di fila per collegarle (tocca di nuovo la stessa runa per annullare la selezione).`,
+    boardKind: 'matchPairs',
+    board: Array(n).fill(null),
+    choices: symbolOrder,
+    clues,
+    solution: partner,
+  };
+  door._testConstraints = chosen;
+  return door;
 }
 
 // ---- v2.1: "La Serratura dei Numeri" e "La Serratura del Calcolo" erano
@@ -816,7 +1009,9 @@ const DOOR_GENERATORS = {
   domino: genDomino,
   guess: genGuessSymbol,
   timeLever: genTimeLever,
-  map: genTornMap,
+  tapSequence: genTapSequence,
+  ritual: genRitualBeat,
+  mosaic: genMosaic,
 };
 const DOOR_TYPES = Object.keys(DOOR_GENERATORS);
 
@@ -876,6 +1071,17 @@ function checkBoardCorrect(door, board) {
         slot != null && slot.player === door.solution.order[i] && Boolean(slot.flipped) === Boolean(door.solution.flipped[i])
       ));
     }
+    case 'tapSequence':
+      if (!Array.isArray(board) || board.length !== door.solution.length) return false;
+      return board.every((v, i) => v === door.solution[i]);
+    case 'pulseSlots': {
+      if (!Array.isArray(board) || board.length !== door.solution.length) return false;
+      const tol = door.tolerance || 0;
+      return board.every((v, i) => v != null && Math.abs(v - door.solution[i]) <= tol);
+    }
+    case 'matchPairs':
+      if (!Array.isArray(board) || board.length !== door.solution.length) return false;
+      return board.every((v, i) => v === door.solution[i]);
     default:
       return false;
   }
@@ -943,6 +1149,35 @@ function applyBoardUpdate(door, board, action) {
       }
       return board;
     }
+    case 'tapSequence': {
+      if (!action) return board;
+      const total = door.solution ? door.solution.length : b.length;
+      if (action.kind === 'tapSlot') {
+        if (typeof action.slot !== 'number' || action.slot < 0 || action.slot >= total) return board;
+        if (b.includes(action.slot) || b.length >= total) return b;
+        b.push(action.slot);
+        return b;
+      }
+      if (action.kind === 'resetSequence') return [];
+      return board;
+    }
+    case 'pulseSlots': {
+      if (!action || action.kind !== 'pressAtBeat') return board;
+      if (action.slot < 0 || action.slot >= b.length) return board;
+      b[action.slot] = clamp(Math.round(Number(action.beat) || 0), 0, 999);
+      return b;
+    }
+    case 'matchPairs': {
+      if (!action || action.kind !== 'connectSlots') return board;
+      const idxA = action.a;
+      const idxB = action.b;
+      if (idxA == null || idxB == null || idxA < 0 || idxB < 0 || idxA >= b.length || idxB >= b.length || idxA === idxB) return board;
+      if (b[idxA] != null) b[b[idxA]] = null;
+      if (b[idxB] != null) b[b[idxB]] = null;
+      b[idxA] = idxB;
+      b[idxB] = idxA;
+      return b;
+    }
     default:
       return board;
   }
@@ -971,5 +1206,6 @@ module.exports = {
   countSolutions,
   countPermutations,
   countDominoArrangements,
+  countMatchings,
   DOMINO_RUNES,
 };

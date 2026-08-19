@@ -407,6 +407,58 @@
   .domino-chip.placed { opacity: 0.5; }
   .domino-hint { font-size: 0.6rem; color: var(--muted); text-align: center; line-height: 1.3; padding: 0 4px; }
 
+  /* ---- v2.2: Il Sentiero a Tappe (tocchi in ordine) ---- */
+  .tap-board { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; width: 100%; }
+  .tap-tile {
+    width: 60px; height: 60px; border-radius: 12px; border: 3px solid var(--ink); border-bottom-width: 5px;
+    background: linear-gradient(160deg, var(--wood-light), var(--wood-mid)); color: var(--gold-light);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-family: 'Cinzel', serif; font-weight: 700; transition: transform 0.08s; padding: 0;
+  }
+  .tap-tile:active { transform: scale(0.94); }
+  .tap-tile-label { font-size: 0.68rem; }
+  .tap-tile-order { font-size: 1.1rem; font-weight: 700; }
+  .tap-tile.tapped { background: linear-gradient(160deg, var(--gold-light), var(--gold)); color: var(--ink); }
+  .tap-reset-btn {
+    width: auto; background: none; border: none; color: var(--muted); text-decoration: underline;
+    font-family: 'Metamorphous', serif; font-size: 0.8rem; padding: 6px 4px; text-transform: none; letter-spacing: 0;
+  }
+
+  /* ---- v2.2: Il Rituale a Tempo (tocchi a tempo su un battito condiviso) ---- */
+  .ritual-board { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
+  .ritual-pulse {
+    width: 84px; height: 84px; border-radius: 50%; border: 4px solid var(--ink); flex-shrink: 0;
+    background: radial-gradient(circle, var(--gold-light), var(--gold));
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 0 rgba(0,0,0,0.35);
+  }
+  .ritual-beat-num { font-family: 'Cinzel', serif; font-weight: 800; font-size: 2rem; color: var(--ink); }
+  .ritual-pulse.pulse-bump { animation: ritualPulseBump 0.35s ease; }
+  @keyframes ritualPulseBump { 0% { transform: scale(1.25); } 100% { transform: scale(1); } }
+  .ritual-players { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .ritual-btn {
+    width: 64px; padding: 8px 4px; border-radius: 12px; border: 3px solid var(--ink); border-bottom-width: 5px;
+    background: linear-gradient(160deg, var(--wood-light), var(--wood-mid)); color: var(--gold-light);
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-family: 'Cinzel', serif; font-weight: 700; transition: transform 0.08s;
+  }
+  .ritual-btn:active { transform: scale(0.94); }
+  .ritual-btn-label { font-size: 0.66rem; }
+  .ritual-btn-beat { font-size: 0.95rem; }
+  .ritual-btn.pressed { background: linear-gradient(160deg, var(--good), #2f8a4c); color: #fff; }
+
+  /* ---- v2.2: Il Mosaico ad Abbinamento (tocca due rune per collegarle) ---- */
+  .mosaic-board { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; width: 100%; }
+  .mosaic-tile {
+    width: 64px; height: 64px; border-radius: 12px; border: 3px solid var(--ink); border-bottom-width: 5px;
+    background: linear-gradient(160deg, var(--wood-light), var(--wood-mid)); color: var(--gold-light);
+    display: flex; align-items: center; justify-content: center; gap: 3px; transition: transform 0.08s; padding: 0;
+  }
+  .mosaic-tile:active { transform: scale(0.94); }
+  .mosaic-tile .icon-svg { width: 22px; height: 22px; }
+  .mosaic-tile.selected { border-color: #fff; box-shadow: 0 0 0 3px var(--gold-light); }
+  .mosaic-tile.connected { background: linear-gradient(160deg, var(--gold-light), var(--gold)); color: var(--ink); }
+  .mosaic-partner-icon .icon-svg { width: 15px; height: 15px; opacity: 0.85; }
+
   .log-box {
     background: var(--wood-mid); border: 2px solid var(--gold); border-radius: 8px; padding: 6px 10px;
     font-size: 0.66rem; color: var(--muted); max-height: 52px; overflow-y: auto; width: 100%; flex-shrink: 0;
@@ -536,7 +588,7 @@
 
 </main>
 <footer>La Torre degli Enigmi</footer>
-<div class="version-badge" id="version-badge">v2.1</div>
+<div class="version-badge" id="version-badge">v2.2</div>
 <!--
 Convenzione numero di versione (vedi anche CONTESTO-PROGETTO.md):
 - Cambio piccolo/incrementale (fix, aggiustamento, dettaglio) -> incrementa la cifra dopo il punto (v1.0 -> v1.1 -> v1.2...).
@@ -556,6 +608,17 @@ Specchio dei Simboli" passa da 1 a 3 simboli: il narratore li descrive a mimo, i
 resto della squadra ha anche indizi incrociati per verificare. "Il Domino Runico"
 non cambia meccanica ma ha istruzioni passo-passo piu' chiare e una legenda
 sull'interfaccia (era "non capito" nel feedback reale).
+v2.2 (2026-08-19): 3 enigmi nuovi fisicamente interattivi (non solo indizi da
+leggere e un numero da scrivere), su richiesta esplicita dopo altro playtest.
+"La Mappa Strappata" (un solo passo aritmetico costante, zero motore a vincoli)
+ritirata perche' rimasta l'unico enigma davvero meccanico. Al suo posto: "Il
+Sentiero a Tappe" (si tocca una sequenza di rune nell'ordine dedotto dagli
+indizi, con un tasto "Ricomincia" per correggere), "Il Rituale a Tempo" (si
+deduce il proprio battito bersaglio dagli indizi, poi si preme davvero al
+momento giusto mentre un battito visivo scorre in tempo reale) e "Il Mosaico
+ad Abbinamento" (6 rune fisse, 3 coppie nascoste dedotte da frammenti di
+conoscenza distribuita tra i giocatori, poi si toccano due rune di fila per
+collegarle). 12 -> 14 tipi di porta totali.
 -->
 
 <script src="/socket.io/socket.io.js"></script>
@@ -568,7 +631,11 @@ sull'interfaccia (era "non capito" nel feedback reale).
   let timerDeadline = null;
   let timerInterval = null;
   let currentDoor = null; // riferimento sempre aggiornato alla porta corrente, usato dagli handler del domino
+  let currentPlayerCount = 0; // numero di giocatori nella stanza, usato dal Sentiero a Tappe (il board parte vuoto e cresce)
   let dominoSelectedPlayer = null;
+  let mosaicSelectedSlot = null; // v2.2: Il Mosaico ad Abbinamento
+  let ritualBeat = 0; // v2.2: Il Rituale a Tempo - battito corrente, puramente locale al client
+  let ritualInterval = null;
 
   const TOTAL_TIME_MS = 12 * 60 * 1000;
   // Devono restare identici a WHEEL_SYMBOLS / COLORS in gameLogic.js (ordine incluso).
@@ -812,6 +879,7 @@ sull'interfaccia (era "non capito" nel feedback reale).
 
     const door = state.door;
     currentDoor = door;
+    currentPlayerCount = (state.players && state.players.length) || currentPlayerCount;
     document.getElementById('door-title').textContent = door.title;
     document.getElementById('door-instructions').textContent = door.instructions;
     document.getElementById('door-icon').src = doorImageFor(state.doorIndex, state.totalDoors);
@@ -904,6 +972,10 @@ sull'interfaccia (era "non capito" nel feedback reale).
     const area = document.getElementById('board-area');
     area.innerHTML = '';
     area.className = 'board-area';
+    // Il battito del Rituale a Tempo e' un interval locale al client: va
+    // sempre fermato quando si ricrea il board, altrimenti sopravvive anche
+    // dopo essere passati a un'altra porta.
+    if (ritualInterval) { clearInterval(ritualInterval); ritualInterval = null; }
 
     if (door.boardKind === 'number') {
       const wrap = document.createElement('div');
@@ -1080,7 +1152,147 @@ sull'interfaccia (era "non capito" nel feedback reale).
 
       area.appendChild(wrap);
       paintDominoBoard(door);
+    } else if (door.boardKind === 'tapSequence') {
+      const wrap = document.createElement('div');
+      wrap.className = 'tap-board';
+      const n = currentPlayerCount || door.board.length || 0;
+      for (let i = 0; i < n; i++) {
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'tap-tile';
+        tile.dataset.slot = i;
+        tile.innerHTML = `<span class="tap-tile-label">G${i + 1}</span><span class="tap-tile-order"></span>`;
+        tile.addEventListener('click', () => socket.emit('updateBoard', { kind: 'tapSlot', slot: i }));
+        wrap.appendChild(tile);
+      }
+      const resetBtn = document.createElement('button');
+      resetBtn.type = 'button';
+      resetBtn.className = 'tap-reset-btn';
+      resetBtn.textContent = '↺ Ricomincia';
+      resetBtn.addEventListener('click', () => socket.emit('updateBoard', { kind: 'resetSequence' }));
+      wrap.appendChild(resetBtn);
+      area.appendChild(wrap);
+      paintTapSequence(door);
+    } else if (door.boardKind === 'pulseSlots') {
+      const wrap = document.createElement('div');
+      wrap.className = 'ritual-board';
+      const pulse = document.createElement('div');
+      pulse.className = 'ritual-pulse';
+      pulse.innerHTML = '<span class="ritual-beat-num" id="ritual-beat-num">0</span>';
+      wrap.appendChild(pulse);
+      const playersRow = document.createElement('div');
+      playersRow.className = 'ritual-players';
+      door.board.forEach((_, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ritual-btn';
+        btn.dataset.slot = i;
+        btn.innerHTML = `<span class="ritual-btn-label">G${i + 1}</span><span class="ritual-btn-beat"></span>`;
+        btn.addEventListener('click', () => socket.emit('updateBoard', { kind: 'pressAtBeat', slot: i, beat: ritualBeat }));
+        playersRow.appendChild(btn);
+      });
+      wrap.appendChild(playersRow);
+      area.appendChild(wrap);
+      paintRitualBoard(door);
+      startRitualPulse();
+    } else if (door.boardKind === 'matchPairs') {
+      mosaicSelectedSlot = null;
+      const wrap = document.createElement('div');
+      wrap.className = 'mosaic-board';
+      door.board.forEach((_, i) => {
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'mosaic-tile';
+        tile.dataset.slot = i;
+        const symIdx = (door.choices && door.choices[i] != null) ? door.choices[i] : i;
+        tile.innerHTML = `<span class="mosaic-icon">${icon(WHEEL_SYMBOLS[symIdx])}</span><span class="mosaic-partner-icon"></span>`;
+        tile.addEventListener('click', () => onMosaicTileClick(i));
+        wrap.appendChild(tile);
+      });
+      area.appendChild(wrap);
+      paintMosaicBoard(door);
     }
+  }
+
+  // v2.2: Il Sentiero a Tappe - il board e' una lista ordinata di slot
+  // toccati (cresce ad ogni tocco valido); dipingiamo il numero d'ordine su
+  // ogni tile senza ricreare gli elementi, per coerenza con le altre board.
+  function paintTapSequence(door) {
+    const area = document.getElementById('board-area');
+    area.querySelectorAll('.tap-tile').forEach((tile) => {
+      const slot = Number(tile.dataset.slot);
+      const pos = door.board.indexOf(slot);
+      const orderSpan = tile.querySelector('.tap-tile-order');
+      if (pos >= 0) {
+        tile.classList.add('tapped');
+        orderSpan.textContent = pos + 1;
+      } else {
+        tile.classList.remove('tapped');
+        orderSpan.textContent = '';
+      }
+    });
+  }
+
+  // v2.2: Il Rituale a Tempo - battito puramente locale al client (non ha
+  // bisogno di sincronia al millisecondo: e' un ritmo visivo condiviso, chi
+  // preme registra semplicemente "a che battito ero" sul board reale).
+  function startRitualPulse() {
+    if (ritualInterval) clearInterval(ritualInterval);
+    ritualBeat = 0;
+    const numEl = document.getElementById('ritual-beat-num');
+    if (numEl) numEl.textContent = ritualBeat;
+    ritualInterval = setInterval(() => {
+      ritualBeat++;
+      const el = document.getElementById('ritual-beat-num');
+      if (!el) { clearInterval(ritualInterval); ritualInterval = null; return; }
+      el.textContent = ritualBeat;
+      const pulseEl = el.parentElement;
+      pulseEl.classList.remove('pulse-bump');
+      void pulseEl.offsetWidth;
+      pulseEl.classList.add('pulse-bump');
+    }, 1100);
+  }
+  function paintRitualBoard(door) {
+    const area = document.getElementById('board-area');
+    area.querySelectorAll('.ritual-btn').forEach((btn, i) => {
+      const v = door.board[i];
+      const beatSpan = btn.querySelector('.ritual-btn-beat');
+      if (v != null) { btn.classList.add('pressed'); beatSpan.textContent = v; }
+      else { btn.classList.remove('pressed'); beatSpan.textContent = ''; }
+    });
+  }
+
+  // v2.2: Il Mosaico ad Abbinamento - seleziona una runa, poi tocca la
+  // seconda per collegarle (stesso pattern "seleziona poi applica" gia'
+  // usato per il Domino Runico).
+  function onMosaicTileClick(i) {
+    if (mosaicSelectedSlot === null) {
+      mosaicSelectedSlot = i;
+    } else if (mosaicSelectedSlot === i) {
+      mosaicSelectedSlot = null;
+    } else {
+      socket.emit('updateBoard', { kind: 'connectSlots', a: mosaicSelectedSlot, b: i });
+      mosaicSelectedSlot = null;
+    }
+    document.querySelectorAll('.mosaic-tile').forEach((t) => {
+      t.classList.toggle('selected', Number(t.dataset.slot) === mosaicSelectedSlot);
+    });
+  }
+  function paintMosaicBoard(door) {
+    const area = document.getElementById('board-area');
+    area.querySelectorAll('.mosaic-tile').forEach((tile) => {
+      const i = Number(tile.dataset.slot);
+      const partner = door.board[i];
+      const partnerSpan = tile.querySelector('.mosaic-partner-icon');
+      if (partner != null) {
+        tile.classList.add('connected');
+        const symIdx = (door.choices && door.choices[partner] != null) ? door.choices[partner] : partner;
+        partnerSpan.innerHTML = icon(WHEEL_SYMBOLS[symIdx]);
+      } else {
+        tile.classList.remove('connected');
+        partnerSpan.innerHTML = '';
+      }
+    });
   }
 
   // Aggiorna i valori senza ricreare gli elementi: evita di perdere il
@@ -1118,6 +1330,12 @@ sull'interfaccia (era "non capito" nel feedback reale).
       });
     } else if (door.boardKind === 'dominoChain') {
       paintDominoBoard(door);
+    } else if (door.boardKind === 'tapSequence') {
+      paintTapSequence(door);
+    } else if (door.boardKind === 'pulseSlots') {
+      paintRitualBoard(door);
+    } else if (door.boardKind === 'matchPairs') {
+      paintMosaicBoard(door);
     }
   }
 
