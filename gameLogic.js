@@ -105,21 +105,6 @@ function numberRiddleClue(target) {
   return sample(templates, 1)[0];
 }
 
-function genSumSecret(numPlayers) {
-  const nums = Array.from({ length: numPlayers }, () => randInt(2, 20));
-  const solution = nums.reduce((a, b) => a + b, 0);
-  return {
-    type: 'sum',
-    title: 'La Serratura dei Numeri',
-    instructions: 'Ogni membro della squadra conosce un piccolo calcolo che nasconde un numero segreto. Risolvetelo, sommate tutti i numeri della squadra e inserite il totale.',
-    boardKind: 'number',
-    board: null,
-    choices: null,
-    clues: nums.map((n) => numberRiddleClue(n)),
-    solution,
-  };
-}
-
 const ORDINALS_IT = ['primo', 'secondo', 'terzo', 'quarto', 'quinto', 'sesto'];
 
 // Conta (fino a `cap`) quante permutazioni di 0..n-1 soddisfano tutti i
@@ -213,25 +198,74 @@ const POETIC_TEMPLATES = [
   (d, p) => `Il guardiano mormora: posizione ${p} da sinistra, la cifra è ${d}.`,
 ];
 
+// v2.1: prima ogni giocatore riceveva la cifra esatta + la sua posizione -
+// pura dettatura, zero deduzione ("molto banale" nel feedback reale). Ora la
+// maggior parte delle cifre si deduce da indizi RELAZIONALI tra posizioni
+// (confronti, somme, uguaglianze, pari/dispari): solo le cifre che restano
+// davvero ambigue anche dopo tutti i confronti disponibili ricevono un
+// indizio diretto, come ultima risorsa per garantire comunque l'unicità.
 function genPoeticClues(numPlayers) {
   const numDigits = clamp(numPlayers, 2, 6);
   const digits = [randInt(1, 9)]; // la prima cifra non è mai 0
   for (let i = 1; i < numDigits; i++) digits.push(randInt(0, 9));
   const solution = Number(digits.join(''));
-  const clues = digits.map((d, i) => {
+
+  const n = numDigits;
+  const pool = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (digits[i] === digits[j]) {
+        pool.push({ text: `Le cifre in posizione ${i + 1} e ${j + 1} sono UGUALI.`, deps: [i, j], test: (a) => a[i] === a[j] });
+      } else {
+        pool.push({ text: `Le cifre in posizione ${i + 1} e ${j + 1} sono DIVERSE tra loro.`, deps: [i, j], test: (a) => a[i] !== a[j] });
+        pool.push(
+          digits[i] > digits[j]
+            ? { text: `La cifra in posizione ${i + 1} è maggiore di quella in posizione ${j + 1}.`, deps: [i, j], test: (a) => a[i] > a[j] }
+            : { text: `La cifra in posizione ${j + 1} è maggiore di quella in posizione ${i + 1}.`, deps: [i, j], test: (a) => a[j] > a[i] }
+        );
+      }
+      const s = digits[i] + digits[j];
+      pool.push({ text: `La somma delle cifre in posizione ${i + 1} e ${j + 1} è ${s}.`, deps: [i, j], test: (a) => a[i] + a[j] === s });
+    }
+    pool.push({ text: `La cifra in posizione ${i + 1} è ${digits[i] % 2 === 0 ? 'PARI' : 'DISPARI'}.`, deps: [i], test: (a) => (a[i] % 2 === 0) === (digits[i] % 2 === 0) });
+  }
+  const directs = digits.map((d, i) => {
     const template = POETIC_TEMPLATES[randInt(0, POETIC_TEMPLATES.length - 1)];
-    return template(d, i + 1);
+    return { text: template(d, i + 1), deps: [i], test: (a) => a[i] === d };
   });
-  return {
+
+  const shuffledPool = shuffle(pool);
+  const chosen = [];
+  const isUnique = () => countSolutions(n, 10, chosen, 2) === 1;
+  for (const c of shuffledPool) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  for (const c of shuffle(directs)) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  if (chosen.length < numPlayers) {
+    const used = new Set(chosen);
+    for (const c of [...shuffledPool, ...directs]) {
+      if (chosen.length >= numPlayers) break;
+      if (!used.has(c)) chosen.push(c);
+    }
+  }
+  const clues = distributeClueTexts(chosen, numPlayers);
+  const door = {
     type: 'poetic',
     title: 'Il Sussurro dei Numeri',
-    instructions: `Ogni membro della squadra conosce una cifra del numero segreto e la sua posizione. Il numero ha ${numDigits} cifre: ricostruitelo insieme e inseritelo.`,
+    instructions: `Il numero segreto ha ${numDigits} cifre. Quasi nessuno conosce una cifra esatta da solo: incrociate a voce gli indizi (confronti, somme, uguaglianze, pari/dispari) posizione per posizione per dedurre ogni cifra, poi inserite il numero completo.`,
     boardKind: 'number',
     board: null,
     choices: null,
     clues,
     solution,
   };
+  door._testConstraints = chosen;
+  door._testNumValues = 10;
+  return door;
 }
 
 function genLiarClue(numPlayers) {
@@ -550,7 +584,7 @@ function genDomino(numPlayers) {
   const door = {
     type: 'domino',
     title: 'Il Domino Runico',
-    instructions: `Ogni membro della squadra ha una tessera con due rune, ma non sa quale faccia va a sinistra o a destra. Il Sigillo mostrato sul board segna l'inizio della catena: incrociate a voce le tessere e componete la catena runica completa (${n} tessere), verso destra, facendo combaciare le facce uguali.`,
+    instructions: `Ogni giocatore ha in segreto una tessera con DUE rune (il tuo indizio qui sotto), ma non sa se vanno lette da sinistra a destra o al contrario. Passo 1: a turno, ognuno dice a voce le due rune della propria tessera. Passo 2: partendo dal Sigillo mostrato sul board (la runa di partenza fissa), decidete insieme quale tessera attacca per prima, facendo combaciare una faccia uguale al Sigillo. Passo 3: sul board, tocca il tuo gettone col numero qui sotto per selezionarlo, poi tocca lo slot della catena dove va messo; se il verso è sbagliato, tocca di nuovo lo slot pieno per capovolgerlo (⇨/⇦). Continuate finché la catena di ${n} tessere è completa senza buchi.`,
     boardKind: 'dominoChain',
     board: Array.from({ length: n }, () => null), // ogni slot: null oppure { player, flipped }
     choices: null,
@@ -592,69 +626,120 @@ function genTornMap(numPlayers) {
   };
 }
 
-// Variante della somma segreta con operazione a sorpresa: tiene la squadra
-// sveglia perché non sa mai in anticipo cosa dovrà calcolare.
-function genOperation(numPlayers) {
-  const opKeys = ['somma', 'differenza', 'prodotto', 'pari'];
-  const op = opKeys[randInt(0, opKeys.length - 1)];
-  let nums;
-  let solution;
-  let howLabel;
-  if (op === 'somma') {
-    nums = Array.from({ length: numPlayers }, () => randInt(2, 20));
-    solution = nums.reduce((a, b) => a + b, 0);
-    howLabel = 'Sommate tutti i numeri della squadra e inserite il totale.';
-  } else if (op === 'differenza') {
-    nums = Array.from({ length: numPlayers }, () => randInt(1, 50));
-    solution = Math.max(...nums) - Math.min(...nums);
-    howLabel = 'Calcolate la differenza tra il numero più alto e il numero più basso della squadra e inseritela.';
-  } else if (op === 'prodotto') {
-    nums = Array.from({ length: numPlayers }, () => randInt(2, 6));
-    solution = nums.reduce((a, b) => a * b, 1);
-    howLabel = 'Moltiplicate tutti i numeri della squadra tra loro e inserite il risultato.';
-  } else {
-    nums = Array.from({ length: numPlayers }, () => randInt(1, 50));
-    solution = nums.filter((n) => n % 2 === 0).length;
-    howLabel = 'Contate quanti numeri PARI ci sono in tutta la squadra e inserite il conteggio.';
-  }
-  return {
-    type: 'operation',
-    title: 'La Serratura del Calcolo',
-    instructions: howLabel,
-    boardKind: 'number',
-    board: null,
-    choices: null,
-    clues: nums.map((n) => `Il tuo numero segreto è ${n}.`),
-    solution,
-  };
-}
+// ---- v2.1: "La Serratura dei Numeri" e "La Serratura del Calcolo" erano
+// strutturalmente identiche (numero privato -> lo si dice a voce -> un
+// calcolo semplice) e senza vera deduzione: chi aveva il numero lo diceva e
+// basta. Le due sono state unite in un solo enigma più profondo qui sotto
+// ("La Cripta dei Numeri"), che usa lo stesso motore a vincoli relazionali
+// di leve/ruote/colori/interruttori invece di dare mai il numero diretto.
+// Ogni membro della squadra ha un numero segreto da 1 a NUMBER_VAULT_RANGE,
+// ma nessuno lo conosce direttamente: si deduce incrociando confronti,
+// somme a coppie e conteggi di numeri pari, poi si inserisce il numero DI
+// OGNI giocatore nella casella corrispondente (serve la striscia roster).
+const NUMBER_VAULT_RANGE = 20; // valori reali 1..20 (internamente 0..19, offset +1)
 
-// Un solo giocatore vede il simbolo giusto e deve descriverlo a voce SENZA
-// nominarlo; gli altri scelgono tra 4 icone mostrate sul loro schermo.
-function genGuessSymbol(numPlayers) {
-  const solutionIdx = randInt(0, WHEEL_SYMBOLS.length - 1);
-  const describerIndex = randInt(0, numPlayers - 1);
-  const decoyPool = WHEEL_SYMBOLS.map((_, i) => i).filter((i) => i !== solutionIdx);
-  const decoyIdx = sample(decoyPool, Math.min(3, decoyPool.length));
-  const choices = shuffle([solutionIdx, ...decoyIdx]);
-  const clues = [];
-  for (let i = 0; i < numPlayers; i++) {
-    if (i === describerIndex) {
-      clues.push(`Devi DESCRIVERE a voce questo simbolo, senza mai nominarlo: ${WHEEL_SYMBOLS[solutionIdx].label}.`);
-    } else {
-      clues.push('Nessun indizio per te: ascolta chi descrive il simbolo e scegli tra le opzioni mostrate.');
+function genNumbersVault(numPlayers) {
+  const n = numPlayers;
+  const sol = Array.from({ length: n }, () => randInt(0, NUMBER_VAULT_RANGE - 1)); // dominio interno 0..19
+  const pool = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (sol[i] === sol[j]) {
+        pool.push({ text: `Il numero del Giocatore ${i + 1} e quello del Giocatore ${j + 1} sono UGUALI.`, deps: [i, j], test: (a) => a[i] === a[j] });
+      } else if (sol[i] > sol[j]) {
+        pool.push({ text: `Il numero del Giocatore ${i + 1} è maggiore di quello del Giocatore ${j + 1}.`, deps: [i, j], test: (a) => a[i] > a[j] });
+      } else {
+        pool.push({ text: `Il numero del Giocatore ${j + 1} è maggiore di quello del Giocatore ${i + 1}.`, deps: [i, j], test: (a) => a[j] > a[i] });
+      }
+      const realSum = sol[i] + sol[j] + 2; // +2 = offset di +1 su ciascuno dei due valori reali
+      pool.push({ text: `La somma dei numeri del Giocatore ${i + 1} e del Giocatore ${j + 1} è ${realSum}.`, deps: [i, j], test: (a) => a[i] + a[j] === sol[i] + sol[j] });
+    }
+    pool.push({ text: `Il numero del Giocatore ${i + 1} è ${sol[i] % 2 === 0 ? 'PARI' : 'DISPARI'}.`, deps: [i], test: (a) => (a[i] % 2 === 0) === (sol[i] % 2 === 0) });
+  }
+  const evenCount = sol.filter((v) => v % 2 === 0).length;
+  pool.push({
+    text: evenCount === 0 ? 'In totale, nessun giocatore ha un numero pari.' : `In totale, esattamente ${evenCount} giocatori hanno un numero pari.`,
+    test: (a) => a.filter((v) => v % 2 === 0).length === evenCount,
+  });
+  const directs = sol.map((v, i) => ({ text: `Il numero del Giocatore ${i + 1} è ${v + 1}.`, deps: [i], test: (a) => a[i] === v }));
+
+  const shuffledPool = shuffle(pool);
+  const chosen = [];
+  const isUnique = () => countSolutions(n, NUMBER_VAULT_RANGE, chosen, 2) === 1;
+  for (const c of shuffledPool) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  for (const c of shuffle(directs)) {
+    if (isUnique()) break;
+    chosen.push(c);
+  }
+  if (chosen.length < n) {
+    const used = new Set(chosen);
+    for (const c of [...shuffledPool, ...directs]) {
+      if (chosen.length >= n) break;
+      if (!used.has(c)) chosen.push(c);
     }
   }
-  return {
+  const clues = distributeClueTexts(chosen, n);
+  const door = {
+    type: 'numbers',
+    title: 'La Cripta dei Numeri',
+    instructions: `Ogni membro della squadra ha un numero segreto da 1 a ${NUMBER_VAULT_RANGE}, ma nessuno lo conosce direttamente: incrociate a voce gli indizi (confronti, somme, pari/dispari...) per dedurre il numero di ognuno, poi inserite il numero del Giocatore N nella casella N. Guarda l'elenco dei numeri della squadra qui sopra.`,
+    boardKind: 'sequenceSlots',
+    board: Array(n).fill(null),
+    choices: null,
+    clues,
+    solution: sol.map((v) => v + 1),
+    needsRoster: true,
+  };
+  door._testConstraints = chosen;
+  door._testNumValues = NUMBER_VAULT_RANGE;
+  return door;
+}
+
+// v2.1: prima era un solo simbolo, un solo "narratore" lo descriveva e gli
+// altri sceglievano tra 4 icone senza nessuna informazione propria - un
+// mimo semplice, zero deduzione per il resto della squadra ("molto base" nel
+// feedback reale). Ora sono 3 simboli da azzeccare: il narratore li vede e
+// li descrive tutti e tre a voce (senza mai nominarli), ma il resto della
+// squadra riceve ANCHE indizi relazionali incrociati tra i 3 simboli (stesso
+// motore a vincoli di ruote/colori/interruttori) da usare per verificare e
+// correggere quello che sentono - mimo E logica insieme, molto più lungo.
+const GUESS_SLOT_COUNT = 3;
+
+function genGuessSymbol(numPlayers) {
+  const n = Math.min(GUESS_SLOT_COUNT, WHEEL_SYMBOLS.length);
+  const sol = Array.from({ length: n }, () => randInt(0, WHEEL_SYMBOLS.length - 1));
+  const describerIndex = randInt(0, numPlayers - 1);
+  const listenerCount = Math.max(1, numPlayers - 1);
+  const chosen = pickConstraints(sol, WHEEL_SYMBOLS.length, 'wheels', listenerCount);
+  const buckets = distributeClueTexts(chosen, listenerCount);
+
+  const clues = [];
+  let bi = 0;
+  for (let i = 0; i < numPlayers; i++) {
+    if (i === describerIndex) {
+      const list = sol.map((v, idx) => `simbolo ${idx + 1} = ${WHEEL_SYMBOLS[v].label}`).join(', ');
+      clues.push(`Tu vedi tutti e ${n} i simboli corretti, ma NON puoi mai nominarli: descrivili a voce uno alla volta (forma, cosa rappresentano, a cosa somigliano...) finché la squadra non li indovina. In ordine: ${list}.`);
+    } else {
+      clues.push(buckets[bi] || 'Nessun indizio diretto per te: ascolta chi descrive e incrocialo con quello che dicono gli altri.');
+      bi++;
+    }
+  }
+  const door = {
     type: 'guess',
     title: 'Lo Specchio dei Simboli',
-    instructions: 'Un solo membro della squadra vede il simbolo giusto e deve descriverlo a voce senza nominarlo. Gli altri scelgono tra le opzioni mostrate.',
-    boardKind: 'choice',
-    board: null,
-    choices,
+    instructions: `Un solo membro della squadra vede i ${n} simboli corretti e li descrive a voce, uno alla volta, senza mai nominarli. Tutti gli altri hanno anche indizi incrociati sulle relazioni tra i simboli (uguali, diversi, quanti in totale...): usateli per verificare quello che sentite, poi toccate le ruote per farle girare.`,
+    boardKind: 'wheelSlots',
+    board: Array(n).fill(0),
+    choices: null,
     clues,
-    solution: solutionIdx,
+    solution: sol,
   };
+  door._testConstraints = chosen;
+  door._testNumValues = WHEEL_SYMBOLS.length;
+  return door;
 }
 
 // Un solo giocatore conosce il punto esatto su una scala 0-100 e deve
@@ -720,7 +805,7 @@ function genToggles(numPlayers) {
 }
 
 const DOOR_GENERATORS = {
-  sum: genSumSecret,
+  numbers: genNumbersVault,
   scale: genScale,
   poetic: genPoeticClues,
   liar: genLiarClue,
@@ -729,7 +814,6 @@ const DOOR_GENERATORS = {
   colors: genColors,
   toggles: genToggles,
   domino: genDomino,
-  operation: genOperation,
   guess: genGuessSymbol,
   timeLever: genTimeLever,
   map: genTornMap,

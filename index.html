@@ -405,6 +405,7 @@
   .domino-chip:active { transform: scale(0.92); }
   .domino-chip.selected { background: linear-gradient(180deg, var(--gold-light), var(--gold)); color: var(--ink); border-color: #fff; }
   .domino-chip.placed { opacity: 0.5; }
+  .domino-hint { font-size: 0.6rem; color: var(--muted); text-align: center; line-height: 1.3; padding: 0 4px; }
 
   .log-box {
     background: var(--wood-mid); border: 2px solid var(--gold); border-radius: 8px; padding: 6px 10px;
@@ -535,7 +536,7 @@
 
 </main>
 <footer>La Torre degli Enigmi</footer>
-<div class="version-badge" id="version-badge">v2.0</div>
+<div class="version-badge" id="version-badge">v2.1</div>
 <!--
 Convenzione numero di versione (vedi anche CONTESTO-PROGETTO.md):
 - Cambio piccolo/incrementale (fix, aggiustamento, dettaglio) -> incrementa la cifra dopo il punto (v1.0 -> v1.1 -> v1.2...).
@@ -545,6 +546,16 @@ Partito da v1.0 il 2026-08-18 (introduzione del badge stesso).
 v2.0 (2026-08-19): restyling "cartoon" - contorni scuri piu' spessi, colori piu' saturi,
 bottoni con rilievo lucido, leve (slider) ridisegnate a mano (erano quasi invisibili
 su alcuni telefoni), font corpo passato a Metamorphous (piu' pesante di IM Fell English).
+v2.1 (2026-08-19): enigmi piu' profondi/lunghi da risolvere, su richiesta esplicita
+dopo playtest reale (segnalati come troppo banali). "La Serratura dei Numeri" e
+"La Serratura del Calcolo" (numero privato -> dettatura -> calcolo, zero deduzione)
+unite in un solo enigma "La Cripta dei Numeri" a indizi relazionali (confronti, somme,
+conteggio pari) come leve/ruote/colori. "Il Sussurro dei Numeri" non da' quasi mai
+piu' la cifra diretta: si deduce da confronti/somme/uguaglianze tra posizioni. "Lo
+Specchio dei Simboli" passa da 1 a 3 simboli: il narratore li descrive a mimo, il
+resto della squadra ha anche indizi incrociati per verificare. "Il Domino Runico"
+non cambia meccanica ma ha istruzioni passo-passo piu' chiare e una legenda
+sull'interfaccia (era "non capito" nel feedback reale).
 -->
 
 <script src="/socket.io/socket.io.js"></script>
@@ -991,11 +1002,12 @@ su alcuni telefoni), font corpo passato a Metamorphous (piu' pesante di IM Fell 
     } else if (door.boardKind === 'wheelSlots') {
       const wrap = document.createElement('div');
       wrap.className = 'slots-board';
+      const wheelLabel = door.type === 'guess' ? 'Simbolo' : 'Ruota';
       door.board.forEach((idx, i) => {
         const slot = document.createElement('button');
         slot.className = 'slot-wheel';
         slot.type = 'button';
-        slot.innerHTML = `<span class="wheel-label">Ruota ${i + 1}</span><span class="wheel-icon">${icon(WHEEL_SYMBOLS[idx])}</span>`;
+        slot.innerHTML = `<span class="wheel-label">${wheelLabel} ${i + 1}</span><span class="wheel-icon">${icon(WHEEL_SYMBOLS[idx])}</span>`;
         slot.addEventListener('click', () => socket.emit('updateBoard', { kind: 'cycleSlot', slot: i }));
         wrap.appendChild(slot);
       });
@@ -1060,6 +1072,11 @@ su alcuni telefoni), font corpo passato a Metamorphous (piu' pesante di IM Fell 
         playersRow.appendChild(chip);
       });
       wrap.appendChild(playersRow);
+
+      const legend = document.createElement('div');
+      legend.className = 'domino-hint';
+      legend.textContent = '1) tocca il tuo gettone qui sotto · 2) tocca lo slot dove va la tessera · 3) tocca di nuovo lo slot per capovolgerla (⇨ = verso normale, ⇦ = capovolta)';
+      wrap.appendChild(legend);
 
       area.appendChild(wrap);
       paintDominoBoard(door);
