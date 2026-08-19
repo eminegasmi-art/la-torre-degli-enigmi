@@ -5,7 +5,7 @@
 // scada un tempo condiviso (la clessidra). Ogni porta ha:
 //   - board: uno stato condiviso, modificabile in tempo reale da chiunque
 //     (un numero, una sequenza, delle leve, delle ruote simboliche, dei
-//     colori, degli interruttori)
+//     colori, dei tocchi a tempo o in ordine, delle rune da abbinare)
 //   - clues: un indizio privato e diverso per ciascun giocatore, che aiuta
 //     a dedurre come dev'essere il board
 //   - solution: nascosta, mai inviata ai client, verificata solo quando la
@@ -58,6 +58,21 @@ const COLORS = [
   { key: 'giallo', hex: '#c9a227', label: 'Giallo' },
   { key: 'viola', hex: '#7d3c98', label: 'Viola' },
 ];
+
+// v2.3: "ruolo vincolato" - alcuni enigmi assegnano a UN giocatore una
+// conoscenza privilegiata (vede/sa la risposta) ma quel giocatore NON deve
+// poter toccare fisicamente il board: deve guidare/dettare/descrivere a
+// voce, mentre il resto della squadra esegue. Per evitarlo non serve
+// toccare server.js: il testo dell'indizio privato arriva gia' al client
+// tramite l'evento personalizzato "myClue" (una stringa per socket), quindi
+// basta un marcatore testuale in testa alla stringa - il client lo
+// riconosce, lo rimuove dalla visualizzazione e disattiva localmente i
+// controlli del board per quel giocatore soltanto (vedi index.html,
+// LOCK_TAG deve restare IDENTICO in entrambi i file).
+const LOCK_TAG = '§LOCK§';
+function markLocked(text) {
+  return LOCK_TAG + text;
+}
 
 // ---- Parametri di partita -------------------------------------------------
 const DOOR_COUNT = 10;
@@ -288,10 +303,24 @@ function genPoeticClues(numPlayers) {
     }
   }
   const clues = distributeClueTexts(chosen, numPlayers);
+
+  // v2.3: per differenziarlo dalla Cripta dei Numeri (stesso motore a
+  // indizi relazionali, ma senza alcun ruolo speciale), un giocatore a
+  // caso diventa il "Custode": riceve in più un'ancora certa (una cifra
+  // diretta) ma non può toccare la tastiera - deve dettarla a voce.
+  // Il resto della squadra continua a dedurre le altre cifre come prima.
+  const custodeIndex = randInt(0, numPlayers - 1);
+  const anchorDigitIndex = randInt(0, numDigits - 1);
+  const anchorTemplate = POETIC_TEMPLATES[randInt(0, POETIC_TEMPLATES.length - 1)];
+  const anchorText = anchorTemplate(digits[anchorDigitIndex], anchorDigitIndex + 1);
+  clues[custodeIndex] = markLocked(
+    `${anchorText} Tu sei il Custode: conosci questa cifra con certezza, ma non puoi toccare la tastiera, dettala a voce agli altri. · ${clues[custodeIndex]}`
+  );
+
   const door = {
     type: 'poetic',
     title: 'Il Sussurro dei Numeri',
-    instructions: `Il numero segreto ha ${numDigits} cifre. Quasi nessuno conosce una cifra esatta da solo: incrociate a voce gli indizi (confronti, somme, uguaglianze, pari/dispari) posizione per posizione per dedurre ogni cifra, poi inserite il numero completo.`,
+    instructions: `Il numero segreto ha ${numDigits} cifre. Un Custode ne conosce una con certezza ma non può toccare la tastiera: deve dettarla a voce. Le altre cifre si deducono incrociando a voce gli indizi (confronti, somme, uguaglianze, pari/dispari) posizione per posizione; poi chi non è il Custode inserisce il numero completo.`,
     boardKind: 'number',
     board: null,
     choices: null,
@@ -332,10 +361,16 @@ function genLiarClue(numPlayers) {
     return vals.some((v) => v) && vals.some((v) => !v);
   });
 
-  const liarIndex = randInt(0, numPlayers - 1);
+  // v2.3: con pochi giocatori un solo bugiardo e' troppo debole (in 3, e'
+  // 2 indizi veri contro 1 falso: basta un confronto rapido). Da 5 in su
+  // due bugiardi indipendenti restano comunque in minoranza (la verita' e'
+  // sempre la maggioranza), ma il confronto richiede di scartare DUE
+  // indizi discordanti invece di uno solo.
+  const liarCount = numPlayers >= 5 ? 2 : 1;
+  const liarIndices = new Set(sample(Array.from({ length: numPlayers }, (_, i) => i), liarCount));
   const clues = [];
   for (let i = 0; i < numPlayers; i++) {
-    if (i === liarIndex) {
+    if (liarIndices.has(i)) {
       const decoy = decoys[randInt(0, decoys.length - 1)];
       const valid = discriminating.filter((t) => t.test(decoy) && !t.test(X));
       const pool = valid.length ? valid : discriminating;
@@ -349,7 +384,9 @@ function genLiarClue(numPlayers) {
   return {
     type: 'liar',
     title: 'La Porta del Bugiardo',
-    instructions: "Ognuno ha un indizio sul numero segreto, ma UNO degli indizi è falso. Confrontateli e scoprite qual è il numero vero tra le quattro opzioni.",
+    instructions: liarCount === 1
+      ? "Ognuno ha un indizio sul numero segreto, ma UNO degli indizi è falso. Confrontateli e scoprite qual è il numero vero tra le quattro opzioni."
+      : `Ognuno ha un indizio sul numero segreto, ma ESATTAMENTE ${liarCount} indizi sono falsi. Confrontateli tutti e scoprite qual è il numero vero tra le quattro opzioni: la verità resta sempre in maggioranza.`,
     boardKind: 'choice',
     board: null,
     choices,
@@ -824,7 +861,7 @@ function genMosaic(numPlayers) {
 // calcolo semplice) e senza vera deduzione: chi aveva il numero lo diceva e
 // basta. Le due sono state unite in un solo enigma più profondo qui sotto
 // ("La Cripta dei Numeri"), che usa lo stesso motore a vincoli relazionali
-// di leve/ruote/colori/interruttori invece di dare mai il numero diretto.
+// di leve/ruote/colori invece di dare mai il numero diretto.
 // Ogni membro della squadra ha un numero segreto da 1 a NUMBER_VAULT_RANGE,
 // ma nessuno lo conosce direttamente: si deduce incrociando confronti,
 // somme a coppie e conteggi di numeri pari, poi si inserisce il numero DI
@@ -897,7 +934,7 @@ function genNumbersVault(numPlayers) {
 // feedback reale). Ora sono 3 simboli da azzeccare: il narratore li vede e
 // li descrive tutti e tre a voce (senza mai nominarli), ma il resto della
 // squadra riceve ANCHE indizi relazionali incrociati tra i 3 simboli (stesso
-// motore a vincoli di ruote/colori/interruttori) da usare per verificare e
+// motore a vincoli di ruote/colori) da usare per verificare e
 // correggere quello che sentono - mimo E logica insieme, molto più lungo.
 const GUESS_SLOT_COUNT = 3;
 
@@ -914,7 +951,9 @@ function genGuessSymbol(numPlayers) {
   for (let i = 0; i < numPlayers; i++) {
     if (i === describerIndex) {
       const list = sol.map((v, idx) => `simbolo ${idx + 1} = ${WHEEL_SYMBOLS[v].label}`).join(', ');
-      clues.push(`Tu vedi tutti e ${n} i simboli corretti, ma NON puoi mai nominarli: descrivili a voce uno alla volta (forma, cosa rappresentano, a cosa somigliano...) finché la squadra non li indovina. In ordine: ${list}.`);
+      // v2.3: il narratore vede la risposta ma non deve poter toccare le
+      // ruote lui stesso - solo descrivere a voce, come un vero mimo.
+      clues.push(markLocked(`Tu vedi tutti e ${n} i simboli corretti, ma NON puoi mai nominarli né toccare le ruote: descrivili a voce uno alla volta (forma, cosa rappresentano, a cosa somigliano...) finché la squadra non li indovina. In ordine: ${list}.`));
     } else {
       clues.push(buckets[bi] || 'Nessun indizio diretto per te: ascolta chi descrive e incrocialo con quello che dicono gli altri.');
       bi++;
@@ -923,7 +962,7 @@ function genGuessSymbol(numPlayers) {
   const door = {
     type: 'guess',
     title: 'Lo Specchio dei Simboli',
-    instructions: `Un solo membro della squadra vede i ${n} simboli corretti e li descrive a voce, uno alla volta, senza mai nominarli. Tutti gli altri hanno anche indizi incrociati sulle relazioni tra i simboli (uguali, diversi, quanti in totale...): usateli per verificare quello che sentite, poi toccate le ruote per farle girare.`,
+    instructions: `Un solo membro della squadra vede i ${n} simboli corretti e li descrive a voce, uno alla volta, senza mai nominarli (e senza toccare le ruote). Tutti gli altri hanno anche indizi incrociati sulle relazioni tra i simboli (uguali, diversi, quanti in totale...): usateli per verificare quello che sentite, poi toccate le ruote per farle girare.`,
     boardKind: 'wheelSlots',
     board: Array(n).fill(0),
     choices: null,
@@ -945,7 +984,11 @@ function genTimeLever(numPlayers) {
   const clues = [];
   for (let i = 0; i < numPlayers; i++) {
     if (i === guideIndex) {
-      clues.push(`Solo tu conosci il punto esatto: ${target} su una scala da 0 a 100. Guida la squadra a voce ("più a destra", "quasi", "fermi") mentre qualcuno sposta la leva.`);
+      // v2.3: chi conosce il bersaglio non deve poter "barare" spostando
+      // lui stesso la leva - il punto della porta e' che deve guidare gli
+      // altri a voce, non risolverla da solo. markLocked disattiva
+      // lato client il controllo del board solo per questo giocatore.
+      clues.push(markLocked(`Solo tu conosci il punto esatto: ${target} su una scala da 0 a 100. Tu NON puoi toccare la leva: guida la squadra a voce ("più a destra", "quasi", "fermi") finché qualcun altro non la porta lì.`));
     } else {
       clues.push('Nessun indizio per te: ascolta chi ti guida a voce e sposta la leva quando serve.');
     }
@@ -953,7 +996,7 @@ function genTimeLever(numPlayers) {
   return {
     type: 'timeLever',
     title: 'La Leva del Tempo',
-    instructions: 'Un solo membro della squadra conosce il punto esatto su una scala 0-100. Deve guidare gli altri a voce finché la leva non è abbastanza precisa.',
+    instructions: 'Un solo membro della squadra conosce il punto esatto su una scala 0-100 e non può toccare la leva: deve guidare gli altri a voce ("più a destra", "quasi", "fermi") finché qualcun altro non la porta al punto giusto.',
     boardKind: 'sliderSlots',
     board: [50],
     choices: null,
@@ -986,16 +1029,11 @@ function genColors(numPlayers) {
   });
 }
 
-function genToggles(numPlayers) {
-  return genConstraintDoor(numPlayers, 'toggles', {
-    type: 'toggles',
-    title: 'Gli Interruttori del Sigillo',
-    instructions: "Ogni interruttore ha uno stato corretto, ma nessuno lo conosce direttamente: incrociate a voce gli indizi (uguaglianze, conteggi...) per dedurre quali vanno accesi, poi toccateli.",
-    boardKind: 'toggleSlots',
-    initialSlotValue: false,
-    numValues: 2,
-  });
-}
+// v2.3: "Gli Interruttori del Sigillo" ritirato - era l'unica variante del
+// motore a vincoli relazionali con dominio binario (acceso/spento): con
+// solo 2 valori possibili la deduzione si esauriva troppo in fretta
+// rispetto a leve/ruote/colori (5-9 valori), ed era anche l'azione fisica
+// meno interessante del gruppo. genToggles/boardKind 'toggleSlots' rimossi.
 
 const DOOR_GENERATORS = {
   numbers: genNumbersVault,
@@ -1005,7 +1043,6 @@ const DOOR_GENERATORS = {
   levers: genLevers,
   wheels: genWheels,
   colors: genColors,
-  toggles: genToggles,
   domino: genDomino,
   guess: genGuessSymbol,
   timeLever: genTimeLever,
@@ -1062,9 +1099,6 @@ function checkBoardCorrect(door, board) {
     case 'colorSlots':
       if (!Array.isArray(board) || board.length !== door.solution.length) return false;
       return board.every((v, i) => v === door.solution[i]);
-    case 'toggleSlots':
-      if (!Array.isArray(board) || board.length !== door.solution.length) return false;
-      return board.every((v, i) => Boolean(v) === Boolean(door.solution[i]));
     case 'dominoChain': {
       if (!Array.isArray(board) || board.length !== door.solution.order.length) return false;
       return board.every((slot, i) => (
@@ -1120,11 +1154,6 @@ function applyBoardUpdate(door, board, action) {
       if (!action || action.kind !== 'cycleSlot') return board;
       if (action.slot < 0 || action.slot >= b.length) return board;
       b[action.slot] = (b[action.slot] + 1) % COLORS.length;
-      return b;
-    case 'toggleSlots':
-      if (!action || action.kind !== 'toggleSlot') return board;
-      if (action.slot < 0 || action.slot >= b.length) return board;
-      b[action.slot] = !b[action.slot];
       return b;
     case 'dominoChain': {
       if (!action || action.slot == null || action.slot < 0 || action.slot >= b.length) return board;
@@ -1208,4 +1237,5 @@ module.exports = {
   countDominoArrangements,
   countMatchings,
   DOMINO_RUNES,
+  LOCK_TAG,
 };

@@ -351,20 +351,17 @@
   .slot-color:active { transform: scale(0.94); }
   .color-label { font-size: 0.62rem; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.6); font-family: 'Cinzel', serif; }
 
-  .slot-toggle {
-    width: 70px; padding: 8px; border-radius: 12px; border: 3px solid var(--ink); border-bottom-width: 5px;
-    background: var(--wood-mid); display: flex; flex-direction: column; align-items: center; gap: 6px;
-    transition: transform 0.08s;
+  /* ---- v2.3: "ruolo vincolato" - il giocatore a cui l'indizio dice che
+     non puo' toccare il board vede i controlli disattivati (niente click/
+     drag) e uno striscione che lo ricorda, invece di scoprirlo per errore
+     mentre gioca. ---- */
+  .clue-panel.clue-locked { background: linear-gradient(160deg, var(--blood-light), var(--blood)); color: var(--parchment); }
+  .board-area.board-locked { pointer-events: none; opacity: 0.55; filter: grayscale(0.3); }
+  .lock-banner {
+    width: 100%; text-align: center; font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.72rem;
+    color: var(--blood-light); background: rgba(20,16,12,0.75); border: 2px solid var(--blood-light);
+    border-radius: 10px; padding: 6px 8px; margin-bottom: 6px; flex-shrink: 0;
   }
-  .slot-toggle:active { transform: scale(0.94); }
-  .toggle-label { font-size: 0.58rem; color: var(--muted); }
-  .toggle-knob { width: 36px; height: 19px; border-radius: 999px; background: var(--blood); border: 2px solid var(--ink); position: relative; transition: background 0.15s; }
-  .toggle-knob::after {
-    content: ''; position: absolute; top: 1px; left: 1px; width: 13px; height: 13px; border-radius: 50%;
-    background: #fff; transition: left 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.4);
-  }
-  .slot-toggle.on .toggle-knob { background: var(--good); }
-  .slot-toggle.on .toggle-knob::after { left: 19px; }
 
   .roster-strip { display: none; flex-wrap: wrap; gap: 4px; justify-content: center; flex-shrink: 0; }
   .roster-strip.visible { display: flex; }
@@ -588,7 +585,7 @@
 
 </main>
 <footer>La Torre degli Enigmi</footer>
-<div class="version-badge" id="version-badge">v2.2</div>
+<div class="version-badge" id="version-badge">v2.3</div>
 <!--
 Convenzione numero di versione (vedi anche CONTESTO-PROGETTO.md):
 - Cambio piccolo/incrementale (fix, aggiustamento, dettaglio) -> incrementa la cifra dopo il punto (v1.0 -> v1.1 -> v1.2...).
@@ -619,6 +616,34 @@ momento giusto mentre un battito visivo scorre in tempo reale) e "Il Mosaico
 ad Abbinamento" (6 rune fisse, 3 coppie nascoste dedotte da frammenti di
 conoscenza distribuita tra i giocatori, poi si toccano due rune di fila per
 collegarle). 12 -> 14 tipi di porta totali.
+v2.3 (2026-08-19): analisi dei 14 enigmi dopo altro playtest, su richiesta
+esplicita. "Gli Interruttori del Sigillo" ritirato (dominio binario, era la
+variante piu' debole del motore a vincoli relazionali). Nuova meccanica
+generale "ruolo vincolato": un giocatore che conosce gia' la risposta puo'
+essere marcato come impossibilitato a toccare il board (solo parlare/
+guidare/dettare) - lato client i suoi controlli si disattivano davvero
+(pointer-events, non solo un avviso), niente da cambiare in server.js
+perche' il marcatore viaggia dentro il testo del suo indizio privato
+personalizzato. Applicata a "La Leva del Tempo" (chi conosce il bersaglio
+non puo' piu' muovere la leva da solo), "Lo Specchio dei Simboli" (il
+narratore non puo' toccare le ruote) e al "Sussurro dei Numeri", riscritto
+con un ruolo "Custode" che conosce una cifra con certezza ma deve dettarla
+a voce - lo differenzia dalla Cripta dei Numeri, che restava meccanicamente
+quasi identica. "La Porta del Bugiardo" rinforzata: con 5-6 giocatori ci
+sono ORA due bugiardi indipendenti invece di uno solo. 14 -> 13 tipi di
+porta totali (un tipo ritirato, nessuno aggiunto: il focus qui era
+approfondire l'esistente, non allargare l'elenco).
+-->
+
+<!--
+Nota di progettazione per il futuro: 7 dei 13 tipi (Cripta dei Numeri,
+Sussurro dei Numeri, Leve, Rune Girevoli, Quadro dei Colori, Rituale a
+Tempo, e in parte Specchio dei Simboli) condividono lo stesso motore di
+deduzione a indizi relazionali - cambia solo l'azione fisica finale. E'
+una scelta consapevole (riuso di un motore verificato > invenzioni
+rischiose), ma su una partita da 10 porte vale la pena, in futuro,
+continuare a monitorare se questo si sente ripetitivo nonostante la
+varieta' di veste.
 -->
 
 <script src="/socket.io/socket.io.js"></script>
@@ -636,6 +661,13 @@ collegarle). 12 -> 14 tipi di porta totali.
   let mosaicSelectedSlot = null; // v2.2: Il Mosaico ad Abbinamento
   let ritualBeat = 0; // v2.2: Il Rituale a Tempo - battito corrente, puramente locale al client
   let ritualInterval = null;
+  // v2.3: "ruolo vincolato" - deve restare IDENTICO a LOCK_TAG in
+  // gameLogic.js. Se il proprio indizio inizia con questo marcatore, il
+  // giocatore non puo' toccare fisicamente il board di quella porta (solo
+  // parlare/guidare/dettare): il marcatore viene tolto dal testo mostrato
+  // e i controlli del board vengono disattivati solo sul SUO schermo.
+  const LOCK_TAG = '§LOCK§';
+  let myActionsLocked = false;
 
   const TOTAL_TIME_MS = 12 * 60 * 1000;
   // Devono restare identici a WHEEL_SYMBOLS / COLORS in gameLogic.js (ordine incluso).
@@ -704,9 +736,15 @@ collegarle). 12 -> 14 tipi di porta totali.
     flashError(document.getElementById('join-error'), 'Impossibile collegarsi al server. Controlla la connessione internet e riprova.');
   });
   socket.on('myClue', ({ clue }) => {
-    myClue = clue;
+    myActionsLocked = typeof clue === 'string' && clue.startsWith(LOCK_TAG);
+    myClue = myActionsLocked ? clue.slice(LOCK_TAG.length) : clue;
     const el = document.getElementById('clue-text');
-    if (el) el.textContent = clue || '...';
+    if (el) el.textContent = myClue || '...';
+    const panel = document.querySelector('.clue-panel');
+    if (panel) panel.classList.toggle('clue-locked', myActionsLocked);
+    // Il board potrebbe essere gia' disegnato (es. reinvio dell'indizio):
+    // riapplica subito il lock invece di aspettare il prossimo renderBoard.
+    applyBoardLock();
   });
 
   // ---- Home ----
@@ -1097,18 +1135,6 @@ collegarle). 12 -> 14 tipi di porta totali.
         wrap.appendChild(slot);
       });
       area.appendChild(wrap);
-    } else if (door.boardKind === 'toggleSlots') {
-      const wrap = document.createElement('div');
-      wrap.className = 'slots-board';
-      door.board.forEach((on, i) => {
-        const slot = document.createElement('button');
-        slot.className = 'slot-toggle' + (on ? ' on' : '');
-        slot.type = 'button';
-        slot.innerHTML = `<span class="toggle-label">${i + 1}</span><span class="toggle-knob"></span>`;
-        slot.addEventListener('click', () => socket.emit('updateBoard', { kind: 'toggleSlot', slot: i }));
-        wrap.appendChild(slot);
-      });
-      area.appendChild(wrap);
     } else if (door.boardKind === 'dominoChain') {
       dominoSelectedPlayer = null;
       const wrap = document.createElement('div');
@@ -1211,6 +1237,30 @@ collegarle). 12 -> 14 tipi di porta totali.
       });
       area.appendChild(wrap);
       paintMosaicBoard(door);
+    }
+    applyBoardLock();
+  }
+
+  // v2.3: "ruolo vincolato" - disattiva (o riattiva) i controlli del board
+  // in base a myActionsLocked, senza sapere nulla del boardKind specifico:
+  // pointer-events:none blocca click/drag/tap su QUALSIASI board gia'
+  // disegnato, cosi' la stessa funzione vale per ogni enigma presente e
+  // futuro che vorra' usare questo meccanismo.
+  function applyBoardLock() {
+    const area = document.getElementById('board-area');
+    if (!area) return;
+    area.classList.toggle('board-locked', myActionsLocked);
+    let banner = document.getElementById('lock-banner');
+    if (myActionsLocked) {
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'lock-banner';
+        banner.className = 'lock-banner';
+        banner.textContent = '🔒 Non puoi toccare il board: guida/descrivi/detta solo a voce.';
+        area.parentElement.insertBefore(banner, area);
+      }
+    } else if (banner) {
+      banner.remove();
     }
   }
 
@@ -1323,10 +1373,6 @@ collegarle). 12 -> 14 tipi di porta totali.
     } else if (door.boardKind === 'colorSlots') {
       area.querySelectorAll('.slot-color').forEach((btn, i) => {
         btn.style.background = COLORS[door.board[i]].hex;
-      });
-    } else if (door.boardKind === 'toggleSlots') {
-      area.querySelectorAll('.slot-toggle').forEach((btn, i) => {
-        btn.classList.toggle('on', !!door.board[i]);
       });
     } else if (door.boardKind === 'dominoChain') {
       paintDominoBoard(door);
