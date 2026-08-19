@@ -7,6 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Metamorphous&family=Uncial+Antiqua&display=swap" rel="stylesheet">
+<!-- v2.4: GSAP per le animazioni "card crawler" (flip porta, tremore su
+     errore, scintille su successo). Se il CDN non è raggiungibile (rete
+     lenta/bloccata) il gioco resta comunque giocabile: il codice controlla
+     sempre "if (window.gsap)" e ripiega su semplici classi CSS. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <style>
   /* ===== v2.0 - stile "cartoon": contorni scuri piu' spessi, colori piu'
      saturi, forme piu' giocose. Font corpo passato da IM Fell English
@@ -29,6 +34,37 @@
     --muted: #c2a97e;
     --bg-1: #14100c;
     --bg-2: #1f1712;
+    /* v2.4: "accento interattivo" - separato dal --gold/--gold-light
+       decorativi (ribbon, pergamena) apposta: sono le porte/ruote/leve
+       che l'utente tocca davvero a cambiare colore con la skin, il resto
+       dell'interfaccia resta un fedele "oro" in ogni skin. */
+    --accent: var(--gold-light);
+    --accent-2: var(--gold);
+  }
+  /* v2.4: "il colore della Torre avanza con te" - la skin del #screen-game
+     segue esattamente le stesse soglie di progresso di doorImageFor() in
+     modo che palette e illustrazione della porta cambino insieme (vedi
+     skinFor() più sotto nello script). Attuale = prime porte, Braci =
+     metà spedizione, Arcano = sprint finale (combacia con door-3.png, che
+     ha già rune blu incise nell'immagine). Scope volutamente ristretto a
+     #screen-game (non tutto il body) così lobby/home restano sempre
+     sulla palette di base, mai "sporcate" da una skin residua.
+     */
+  #screen-game[data-skin="braci"] {
+    --wood-dark: #1c0f08; --wood-mid: #331a0e; --wood-light: #6b3410;
+    --parchment: #fbe6c4; --parchment-2: #f0cf9a; --ink: #1a0d05;
+    --gold: #e8862e; --gold-light: #ffb457;
+    --blood: #c22e2e; --blood-light: #ff7a52;
+    --good: #5fc26a; --text: #f6e2c4; --muted: #cf9f74;
+    --accent: #ffb457; --accent-2: #e8862e;
+  }
+  #screen-game[data-skin="arcano"] {
+    --wood-dark: #211a2c; --wood-mid: #362a49; --wood-light: #4f3d6b;
+    --parchment: #f2e9ff; --parchment-2: #ddc9f5; --ink: #180f26;
+    --gold: #c9a227; --gold-light: #ffd76a;
+    --blood: #b23a5c; --blood-light: #f0708f;
+    --good: #4fd6b0; --text: #ece2ff; --muted: #a996c9;
+    --accent: #6ee7ff; --accent-2: #4fd6b0;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; overflow: hidden; }
@@ -144,7 +180,7 @@
     background: rgba(255,255,255,0.22); pointer-events: none;
   }
   .btn-primary {
-    background: linear-gradient(180deg, var(--gold-light), var(--gold));
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
     color: var(--ink);
     border: 3px solid var(--ink);
     border-bottom-width: 6px;
@@ -228,13 +264,40 @@
   }
 
   .timer-bar { width: 100%; height: 9px; background: var(--wood-dark); border-radius: 999px; overflow: hidden; border: 2px solid var(--ink); flex-shrink: 0; }
-  .timer-bar-fill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-light)); transition: width 0.3s linear, background 0.3s; }
+  .timer-bar-fill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); transition: width 0.3s linear, background 0.3s; }
   .timer-bar-fill.low { background: linear-gradient(90deg, var(--blood), var(--blood-light)); }
 
-  .door-title-row { display: flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; }
-  .door-icon { width: 22px; height: auto; max-height: 30px; object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.6)); }
-  .door-title { font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.88rem; color: var(--gold-light); text-align: center; }
-  .door-instructions { font-size: 0.7rem; color: var(--muted); text-align: center; line-height: 1.35; flex-shrink: 0; }
+  /* ---- v2.4: "carta enigma" stile card crawler - sostituisce la vecchia
+     iconcina da 22px accanto al titolo con l'arte della porta grande in
+     cima, un ribbon del titolo che ci si sovrappone, e un bordo che pulsa
+     piano (più intenso a ogni risposta giusta). #game-card avvolge tutto
+     (titolo/istruzioni/roster/indizio/board/pulsante) in un unico blocco
+     con la sua ombra/bordo, invece di elementi separati nello .screen. ---- */
+  #screen-game.active { perspective: 1000px; }
+  .card { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .card-frame {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    border-radius: 16px; border: 3px solid var(--ink); overflow: hidden;
+    background: var(--wood-mid);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent), 0 4px 0 rgba(0,0,0,0.35);
+    animation: cardGlow 3.2s ease-in-out infinite;
+  }
+  @keyframes cardGlow {
+    0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent), 0 4px 0 rgba(0,0,0,0.35); }
+    50% { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--accent) 55%, transparent), 0 4px 0 rgba(0,0,0,0.35); }
+  }
+  .card-art-wrap { position: relative; height: 116px; flex-shrink: 0; overflow: hidden; }
+  .card-art { width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
+  .card-art-fade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0) 38%, var(--wood-mid) 97%); }
+  .card-ribbon {
+    margin: -20px 10px 0; position: relative; z-index: 2; text-align: center; padding: 6px 10px 5px;
+    background: linear-gradient(160deg, var(--parchment), var(--parchment-2));
+    border: 3px solid var(--ink); border-radius: 10px; box-shadow: 0 3px 6px rgba(0,0,0,0.5); flex-shrink: 0;
+  }
+  .card-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; }
+
+  .door-title { font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.86rem; color: var(--ink); text-align: center; }
+  .door-instructions { font-size: 0.68rem; color: var(--muted); text-align: center; line-height: 1.32; flex-shrink: 0; }
 
   .clue-panel {
     background: linear-gradient(160deg, var(--gold-light), var(--gold)); color: var(--ink);
@@ -245,18 +308,37 @@
 
   .board-area {
     flex: 1; min-height: 60px; width: 100%; display: flex; align-items: center; justify-content: center;
-    overflow-y: auto; padding: 10px 8px; border: 3px solid var(--ink); border-radius: 14px;
+    overflow-y: auto; padding: 10px 8px; border: 3px solid var(--ink); border-radius: 14px; position: relative;
     background:
       linear-gradient(rgba(20,16,12,0.55), rgba(20,16,12,0.55)),
       url('board-frame.jpg') center / cover no-repeat;
     background-color: var(--wood-mid);
   }
-  .board-area.wrong-flash { animation: wrongFlash 0.4s ease; }
-  @keyframes wrongFlash {
-    0%, 100% { border-color: var(--ink); }
-    30%, 70% { border-color: var(--blood-light); transform: translateX(-4px); }
+  /* Ripiego SENZA GSAP (rete lenta/CDN bloccato): un tremore CSS puro,
+     applicato alla carta intera invece che al solo board come in v2.3. */
+  .card.wrong-flash-css { animation: wrongFlashCss 0.4s ease; }
+  @keyframes wrongFlashCss {
+    0%, 100% { transform: translateX(0); }
+    30%, 70% { transform: translateX(-4px); }
     50% { transform: translateX(4px); }
   }
+  .card.correct-flash-css { animation: correctFlashCss 0.5s ease; }
+  @keyframes correctFlashCss {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.4); }
+  }
+  .card.door-change-css { animation: doorChangeCss 0.4s ease; }
+  @keyframes doorChangeCss {
+    0% { opacity: 0.3; transform: scale(0.97); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  .burst-layer { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+  .spark {
+    position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 8px var(--accent); left: 50%; bottom: 46px; opacity: 0;
+  }
+  .flash-overlay { position: absolute; inset: 0; background: var(--blood); opacity: 0; pointer-events: none; mix-blend-mode: screen; border-radius: 16px; z-index: 6; }
+  .glow-overlay { position: absolute; inset: 0; background: radial-gradient(circle, var(--accent) 0%, transparent 72%); opacity: 0; pointer-events: none; border-radius: 16px; z-index: 6; }
 
   .number-board { display: flex; align-items: center; justify-content: center; width: 100%; }
   .number-board.has-map { flex-direction: column; gap: 10px; }
@@ -316,7 +398,7 @@
   }
   .slot-range::-webkit-slider-thumb {
     -webkit-appearance: none; width: 28px; height: 28px; margin-top: -9px; border-radius: 50%;
-    background: linear-gradient(180deg, var(--gold-light), var(--gold));
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 3px solid var(--ink); box-shadow: 0 2px 0 rgba(0,0,0,0.4);
   }
   .slot-range::-moz-range-track {
@@ -324,10 +406,10 @@
   }
   .slot-range::-moz-range-thumb {
     width: 22px; height: 22px; border-radius: 50%;
-    background: linear-gradient(180deg, var(--gold-light), var(--gold));
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 3px solid var(--ink); box-shadow: 0 2px 0 rgba(0,0,0,0.4);
   }
-  .slot-range::-moz-range-progress { height: 14px; border-radius: 999px; background: var(--gold); }
+  .slot-range::-moz-range-progress { height: 14px; border-radius: 999px; background: var(--accent-2); }
   .slot-value {
     width: 28px; text-align: center; font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.95rem;
     color: var(--gold-light); flex-shrink: 0; text-shadow: 0 1px 0 var(--ink);
@@ -341,7 +423,7 @@
   }
   .slot-wheel:active { transform: scale(0.94); }
   .wheel-label { font-size: 0.58rem; color: var(--muted); }
-  .wheel-icon .icon-svg { width: 24px; height: 24px; color: var(--gold-light); }
+  .wheel-icon .icon-svg { width: 24px; height: 24px; color: var(--accent); }
 
   .slot-color {
     width: 54px; height: 54px; border-radius: 12px; border: 3px solid var(--ink); border-bottom-width: 5px;
@@ -553,21 +635,33 @@
     </div>
     <div class="timer-bar"><div class="timer-bar-fill" id="timer-bar-fill"></div></div>
 
-    <div class="door-title-row">
-      <img class="door-icon" id="door-icon" src="door-1.png" alt="" />
-      <div class="door-title" id="door-title">—</div>
+    <div class="card" id="game-card">
+      <div class="card-frame" id="card-frame">
+        <div class="card-art-wrap">
+          <img class="card-art" id="door-icon" src="door-1.png" alt="" />
+          <div class="card-art-fade"></div>
+        </div>
+        <div class="card-ribbon">
+          <div class="door-title" id="door-title">—</div>
+        </div>
+        <div class="card-body">
+          <div class="door-instructions" id="door-instructions">—</div>
+          <div class="roster-strip" id="roster-strip"></div>
+
+          <div class="clue-panel">
+            <div class="clue-label">Il tuo indizio segreto</div>
+            <div class="clue-text" id="clue-text">...</div>
+          </div>
+
+          <div class="board-area" id="board-area"></div>
+
+          <button class="btn-primary" id="btn-confirm">Conferma soluzione</button>
+        </div>
+      </div>
+      <div class="burst-layer" id="burst-layer"></div>
+      <div class="flash-overlay" id="flash-overlay"></div>
+      <div class="glow-overlay" id="glow-overlay"></div>
     </div>
-    <div class="door-instructions" id="door-instructions">—</div>
-    <div class="roster-strip" id="roster-strip"></div>
-
-    <div class="clue-panel">
-      <div class="clue-label">Il tuo indizio segreto</div>
-      <div class="clue-text" id="clue-text">...</div>
-    </div>
-
-    <div class="board-area" id="board-area"></div>
-
-    <button class="btn-primary" id="btn-confirm">Conferma soluzione</button>
     <div class="log-box" id="log-box"></div>
     <div class="error-box" id="game-error"></div>
   </div>
@@ -585,7 +679,7 @@
 
 </main>
 <footer>La Torre degli Enigmi</footer>
-<div class="version-badge" id="version-badge">v2.3</div>
+<div class="version-badge" id="version-badge">v2.4</div>
 <!--
 Convenzione numero di versione (vedi anche CONTESTO-PROGETTO.md):
 - Cambio piccolo/incrementale (fix, aggiustamento, dettaglio) -> incrementa la cifra dopo il punto (v1.0 -> v1.1 -> v1.2...).
@@ -646,6 +740,49 @@ continuare a monitorare se questo si sente ripetitivo nonostante la
 varieta' di veste.
 -->
 
+<!--
+v2.4 (2026-08-19): restyling "card crawler" della schermata di gioco, su
+richiesta esplicita dopo due giri di mockup di confronto (il primo con
+placeholder CSS, giudicato "brutto e non fedele"; il secondo con le
+immagini VERE del repo, approvato). La vecchia iconcina della porta da
+22px accanto al titolo diventa l'arte grande in cima a una "carta enigma"
+(#game-card): arte + sfumatura di fondo + ribbon del titolo che vi si
+sovrappone + bordo che pulsa piano (col colore della skin attiva) sopra
+titolo/istruzioni/roster/indizio/board/pulsante, tutti raggruppati dentro
+la stessa carta invece di essere elementi separati nello .screen.
+Aggiunto GSAP via CDN per le animazioni: flip 3D della carta al cambio
+porta, tremore + lampo rosso su risposta sbagliata, scintille dorate +
+bagliore + "respiro" di scala su risposta giusta - ognuna con un ripiego
+in puro CSS (classi *-css) se "window.gsap" non è definito, cosi' il
+gioco resta comunque giocabile senza il CDN (rete lenta/bloccata).
+Aggiunta la progressione di palette richiesta dall'utente ("prime porte
+attuale, poi diventa braci, avvicinandosi alla decima diventa arcano"):
+skinFor(doorIndex, totalDoors) usa le STESSE soglie (0.4 / 0.8) di
+doorImageFor(), gia' esistente per la scelta di door-1/2/3.png, cosi'
+palette e illustrazione avanzano sempre insieme (utile scoperta: door-3.png
+ha gia' rune blu incise nell'immagine, coerenti con l'accento ciano scelto
+per "Arcano"). Nuove variabili --accent/--accent-2 (di base = --gold-light/
+--gold) sostituiscono --gold-light/--gold solo sugli elementi VERAMENTE
+interattivi (bordo della carta, barra del tempo, pulsante Conferma, icona
+delle ruote, manopola delle leve): gli elementi decorativi (ribbon del
+titolo, pannello indizio) restano oro fedele in ogni skin. Skin applicata
+via attributo data-skin SOLO su #screen-game (mai su tutto il body), cosi'
+lobby/home non ereditano mai una skin residua dell'ultima porta giocata.
+Aggiornato anche test.js (era rimasto fermo alla v1, con riferimenti a
+tipi di porta ritirati da tempo: sum/operation/toggles/map, più il vecchio
+"guess" a 1 simbolo - non era mai stato ricaricato in sessione dalla v2.1
+in poi) per riflettere i 13 tipi attuali, il meccanismo "ruolo vincolato"
+(LOCK_TAG) e i due bugiardi di "liar" da 5 giocatori in su.
+-->
+
+<!--
+Nota per il prossimo giro: se piace la direzione, il passo successivo è
+generare nuova arte dedicata per completare lo stile card crawler su TUTTI
+i tipi di porta (oggi solo 3 immagini "porta" ruotano in base al progresso,
+non una per tipo di enigma) - prompt da preparare insieme e generare con
+Gemini come per gli asset esistenti.
+-->
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
   const socket = io();
@@ -687,6 +824,16 @@ varieta' di veste.
     if (progress >= 0.8) return 'door-3.png';
     if (progress >= 0.4) return 'door-2.png';
     return 'door-1.png';
+  }
+  // v2.4: la palette della carta enigma segue LE STESSE soglie di
+  // doorImageFor(), cosi' l'illustrazione della porta e i colori
+  // dell'interfaccia avanzano insieme (su richiesta esplicita: "prime
+  // porte attuale, poi braci, avvicinandosi alla decima arcano").
+  function skinFor(doorIndex, totalDoors) {
+    const progress = doorIndex / Math.max(1, totalDoors - 1);
+    if (progress >= 0.8) return 'arcano';
+    if (progress >= 0.4) return 'braci';
+    return 'attuale';
   }
 
   const ICONS = {
@@ -790,11 +937,10 @@ varieta' di veste.
   // ---- Game: conferma soluzione ----
   document.getElementById('btn-confirm').addEventListener('click', () => {
     socket.emit('confirmDoor', {}, (res) => {
-      if (res && res.ok && !res.correct) {
-        const area = document.getElementById('board-area');
-        area.classList.remove('wrong-flash');
-        void area.offsetWidth;
-        area.classList.add('wrong-flash');
+      if (res && res.ok && res.correct) {
+        playCorrectAnim();
+      } else if (res && res.ok && !res.correct) {
+        playWrongAnim();
       } else if (!res || !res.ok) {
         flashError(document.getElementById('game-error'), 'Errore di comunicazione col server.');
       }
@@ -921,13 +1067,16 @@ varieta' di veste.
     document.getElementById('door-title').textContent = door.title;
     document.getElementById('door-instructions').textContent = door.instructions;
     document.getElementById('door-icon').src = doorImageFor(state.doorIndex, state.totalDoors);
+    document.getElementById('screen-game').setAttribute('data-skin', skinFor(state.doorIndex, state.totalDoors));
     document.getElementById('clue-text').textContent = myClue || '...';
     renderRoster(state);
 
     const key = state.doorIndex + '-' + door.type;
     if (key !== lastDoorKey) {
+      const isFirstDoor = lastDoorKey === null;
       renderBoard(door);
       lastDoorKey = key;
+      if (!isFirstDoor) playDoorChangeAnim();
     } else {
       updateBoardValues(door);
     }
@@ -1261,6 +1410,80 @@ varieta' di veste.
       }
     } else if (banner) {
       banner.remove();
+    }
+  }
+
+  // v2.4: animazioni "card crawler" sulla carta enigma (#game-card). Ogni
+  // funzione controlla "if (window.gsap)" e ripiega su una classe CSS
+  // semplice se GSAP non si è caricato (rete lenta/CDN bloccato) - il
+  // gioco resta sempre giocabile, cambia solo la qualità del feedback.
+  function playDoorChangeAnim() {
+    const card = document.getElementById('game-card');
+    const frame = document.getElementById('card-frame');
+    if (!card) return;
+    if (window.gsap) {
+      gsap.killTweensOf(card);
+      gsap.timeline()
+        .fromTo(card, { rotateY: 90 }, { rotateY: 0, duration: 0.45, ease: 'back.out(1.5)' })
+        .fromTo(frame, { opacity: 0.35 }, { opacity: 1, duration: 0.25 }, 0.05);
+    } else {
+      card.classList.remove('door-change-css');
+      void card.offsetWidth;
+      card.classList.add('door-change-css');
+    }
+  }
+
+  function playWrongAnim() {
+    const card = document.getElementById('game-card');
+    const flash = document.getElementById('flash-overlay');
+    if (!card) return;
+    if (window.gsap) {
+      gsap.killTweensOf([card, flash]);
+      gsap.timeline()
+        .to(flash, { opacity: 0.5, duration: 0.08 })
+        .to(flash, { opacity: 0, duration: 0.5 }, 0.08)
+        .to(card, { x: -8, duration: 0.06 }, 0)
+        .to(card, { x: 7, duration: 0.06 }, 0.06)
+        .to(card, { x: -5, duration: 0.06 }, 0.12)
+        .to(card, { x: 3, duration: 0.06 }, 0.18)
+        .to(card, { x: 0, duration: 0.06 }, 0.24);
+    } else {
+      card.classList.remove('wrong-flash-css');
+      void card.offsetWidth;
+      card.classList.add('wrong-flash-css');
+    }
+  }
+
+  function playCorrectAnim() {
+    const card = document.getElementById('game-card');
+    const burstLayer = document.getElementById('burst-layer');
+    const glow = document.getElementById('glow-overlay');
+    if (!card) return;
+    if (window.gsap) {
+      gsap.killTweensOf([card, glow]);
+      if (burstLayer) {
+        burstLayer.innerHTML = '';
+        const n = 12;
+        for (let i = 0; i < n; i++) {
+          const s = document.createElement('div');
+          s.className = 'spark';
+          burstLayer.appendChild(s);
+          const angle = (i / n) * Math.PI * 2;
+          const dist = 40 + Math.random() * 30;
+          gsap.timeline()
+            .set(s, { opacity: 1, x: 0, y: 0, scale: 1 })
+            .to(s, { x: Math.cos(angle) * dist, y: Math.sin(angle) * dist, opacity: 0, scale: 0.3, duration: 0.6 + Math.random() * 0.3, ease: 'power2.out' });
+        }
+      }
+      gsap.timeline()
+        .to(glow, { opacity: 0.6, duration: 0.15 })
+        .to(glow, { opacity: 0, duration: 0.9, ease: 'power1.out' }, 0.15)
+        .to(card, { scale: 1.03, duration: 0.16, ease: 'power2.out' }, 0)
+        .to(card, { scale: 1, duration: 0.45, ease: 'elastic.out(1, 0.5)' }, 0.16);
+    } else {
+      card.classList.remove('correct-flash-css');
+      void card.offsetWidth;
+      card.classList.add('correct-flash-css');
     }
   }
 
