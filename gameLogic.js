@@ -120,19 +120,84 @@ function genSumSecret(numPlayers) {
   };
 }
 
-function genBrokenSequence(numPlayers) {
-  const nums = uniqueRandomInts(numPlayers, 1, 60);
-  const solution = [...nums].sort((a, b) => a - b);
-  return {
-    type: 'sequence',
-    title: 'La Scala Crescente',
-    instructions: 'Ognuno conosce un numero. Sistemate tutti i numeri della squadra in ordine crescente, da sinistra a destra.',
+const ORDINALS_IT = ['primo', 'secondo', 'terzo', 'quarto', 'quinto', 'sesto'];
+
+// Conta (fino a `cap`) quante permutazioni di 0..n-1 soddisfano tutti i
+// constraints: usata per verificare che i confronti scelti individuino UNA
+// SOLA classifica possibile, esattamente come per gli enigmi a vincoli.
+function countPermutations(n, constraints, cap) {
+  let count = 0;
+  const perm = new Array(n).fill(-1);
+  const usedRank = new Array(n).fill(false);
+  function rec(i) {
+    if (count >= cap) return;
+    if (i === n) { count++; return; }
+    for (let r = 0; r < n; r++) {
+      if (usedRank[r]) continue;
+      perm[i] = r;
+      usedRank[r] = true;
+      if (constraints.every((c) => c.deps.every((d) => d <= i) ? c.test(perm) : true)) rec(i + 1);
+      usedRank[r] = false;
+      if (count >= cap) return;
+    }
+  }
+  rec(0);
+  return count;
+}
+
+// Ogni giocatore ha un oggetto di peso diverso (una classifica nascosta, non
+// un valore assoluto). Gli indizi sono confronti a coppie ("il tuo pesa più
+// di quello del Giocatore 3") che la squadra deve incrociare a voce per
+// ricostruire l'intera classifica - mai un singolo indizio dà la posizione
+// esatta, a meno che non sia necessario per garantire l'unicità.
+function genScale(numPlayers) {
+  const n = numPlayers;
+  const rank = shuffle(Array.from({ length: n }, (_, i) => i)); // rank[i] = posizione (0=più leggero) dell'oggetto del giocatore i
+  const pairs = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) pairs.push([i, j]);
+  const shuffledPairs = shuffle(pairs);
+  const cluesByPlayer = Array.from({ length: n }, () => []);
+  const chosen = [];
+  const isUnique = () => countPermutations(n, chosen, 2) === 1;
+  for (const [i, j] of shuffledPairs) {
+    if (isUnique()) break;
+    const iHeavier = rank[i] > rank[j];
+    chosen.push({ deps: [Math.max(i, j)], test: (p) => (iHeavier ? p[i] > p[j] : p[i] < p[j]) });
+    cluesByPlayer[i].push(`Il tuo oggetto pesa ${iHeavier ? 'più' : 'meno'} di quello del Giocatore ${j + 1}.`);
+    cluesByPlayer[j].push(`Il tuo oggetto pesa ${iHeavier ? 'meno' : 'più'} di quello del Giocatore ${i + 1}.`);
+  }
+  // Ultima risorsa (rara con pochi giocatori): posizione assoluta in classifica.
+  let gi = 0;
+  const directOrder = shuffle(Array.from({ length: n }, (_, i) => i));
+  while (!isUnique() && gi < n) {
+    const i = directOrder[gi++];
+    chosen.push({ deps: [i], test: (p) => p[i] === rank[i] });
+    cluesByPlayer[i].push(`Il tuo oggetto è il ${ORDINALS_IT[rank[i]] || rank[i] + 1 + 'º'} più leggero della squadra.`);
+  }
+  // Nessuno resta senza nemmeno un indizio, se possibile.
+  for (const [i, j] of shuffledPairs) {
+    if (cluesByPlayer.every((c) => c.length > 0)) break;
+    if (cluesByPlayer[i].length === 0) {
+      const iHeavier = rank[i] > rank[j];
+      cluesByPlayer[i].push(`Il tuo oggetto pesa ${iHeavier ? 'più' : 'meno'} di quello del Giocatore ${j + 1}.`);
+    }
+  }
+  const clues = cluesByPlayer.map((c) => (c.length ? c.join(' · ') : 'Nessun confronto diretto per te: ascolta gli altri per dedurre la posizione del tuo oggetto.'));
+  const order = new Array(n);
+  rank.forEach((r, i) => { order[r] = i + 1; }); // order[posizione] = numero del giocatore (1-based), dal più leggero al più pesante
+  const door = {
+    type: 'scale',
+    title: 'La Bilancia degli Antenati',
+    instructions: `Ogni membro della squadra porta un oggetto di peso diverso. Confrontate a voce gli indizi (chi pesa più o meno di chi) e disponete i numeri dei ${n} giocatori in ordine di peso, dal più leggero (a sinistra) al più pesante (a destra). Guarda l'elenco dei numeri della squadra qui sopra.`,
     boardKind: 'sequenceSlots',
-    board: Array(numPlayers).fill(null),
+    board: Array(n).fill(null),
     choices: null,
-    clues: nums.map((n) => `Il tuo numero è ${n}.`),
-    solution,
+    clues,
+    solution: order,
+    needsRoster: true,
   };
+  door._testConstraints = chosen;
+  return door;
 }
 
 // Il numero segreto ha tante CIFRE quanti sono i giocatori: ognuno conosce
@@ -414,28 +479,91 @@ function genLevers(numPlayers) {
   });
 }
 
-// La sequenza segue un passo costante (crescente); manca un valore, e ogni
-// giocatore ne conosce uno con la sua posizione. Sempre deducibile: bastano
-// due posizioni qualsiasi per calcolare il passo e ricostruire il resto.
-function genMissingNumber(numPlayers) {
-  const L = numPlayers + 1;
-  const start = randInt(1, 15);
-  const step = randInt(1, 7);
-  const terms = Array.from({ length: L }, (_, i) => start + i * step);
-  const missingIndex = randInt(0, L - 1);
-  const solution = terms[missingIndex];
-  const knownPositions = terms.map((_, i) => i).filter((i) => i !== missingIndex);
-  const clues = knownPositions.map((pos) => `La posizione ${pos + 1} della sequenza vale ${terms[pos]}.`);
-  return {
-    type: 'missing',
-    title: 'Il Numero Mancante',
-    instructions: `La sequenza ha ${L} posizioni e segue un andamento regolare (si aggiunge sempre lo stesso passo). Manca il valore in posizione ${missingIndex + 1}: deducete il passo e trovatelo.`,
-    boardKind: 'number',
-    board: null,
+// ---- Il Domino Runico -----------------------------------------------------
+// Nomi di rune usati SOLO nel testo degli indizi (non servono icone): un
+// pool più ampio dei 6 simboli delle ruote evita che con 6 giocatori (7
+// valori necessari nella catena) si sia costretti a ripetizioni.
+const DOMINO_RUNES = ['Fuoco', 'Ghiaccio', 'Terra', 'Aria', 'Luce', 'Ombra', 'Tempo', 'Sangue'];
+
+// Conta (fino a `cap`) quante catene complete e valide si possono formare con
+// l'insieme di tessere date, partendo dalla faccia `startFace` (il sigillo
+// pubblico): ogni tessera non ancora usata che abbia una faccia uguale al
+// valore "richiesto" può proseguire la catena, in uno dei due versi.
+function countDominoArrangements(tiles, startFace, cap) {
+  const used = new Array(tiles.length).fill(false);
+  let count = 0;
+  function rec(needed, placed) {
+    if (count >= cap) return;
+    if (placed === tiles.length) { count++; return; }
+    for (let t = 0; t < tiles.length; t++) {
+      if (used[t] || count >= cap) continue;
+      const { a, b } = tiles[t];
+      if (a === needed) {
+        used[t] = true;
+        rec(b, placed + 1);
+        used[t] = false;
+      }
+      if (b === needed && b !== a && count < cap) {
+        used[t] = true;
+        rec(a, placed + 1);
+        used[t] = false;
+      }
+    }
+  }
+  rec(startFace, 0);
+  return count;
+}
+
+// Ogni giocatore ha una tessera con due rune (una coppia consecutiva di una
+// catena nascosta), senza sapere quale faccia va a sinistra o a destra. Un
+// "sigillo" pubblico e fisso segna dove deve iniziare la catena (evita
+// l'ambiguità classica del domino: la catena letta al contrario sarebbe
+// altrettanto valida senza un punto di partenza riconoscibile). Prima di
+// consegnare le tessere si verifica - per forza bruta, lo spazio di ricerca
+// è piccolo - che esista UNA SOLA disposizione valida: altrimenti si
+// rigenera la catena da capo.
+function genDomino(numPlayers) {
+  const n = numPlayers;
+  let path;
+  let naturalTiles;
+  let attempts = 0;
+  do {
+    attempts++;
+    path = Array.from({ length: n + 1 }, () => randInt(0, DOMINO_RUNES.length - 1));
+    naturalTiles = Array.from({ length: n }, (_, i) => ({ a: path[i], b: path[i + 1] }));
+  } while (
+    (path[n] === path[0] || countDominoArrangements(naturalTiles, path[0], 2) !== 1)
+    && attempts < 500
+  );
+
+  // Assegna le tessere "naturali" ai giocatori con un ordine casuale, così
+  // "il giocatore N ha la tessera N-esima" non è mai una scorciatoia valida.
+  const perm = shuffle(Array.from({ length: n }, (_, i) => i)); // perm[player] = posizione naturale della sua tessera
+  const inversePerm = new Array(n);
+  perm.forEach((naturalPos, player) => { inversePerm[naturalPos] = player; });
+
+  const clues = perm.map((naturalPos) => {
+    const t = naturalTiles[naturalPos];
+    return `La tua tessera runica mostra due rune: ${DOMINO_RUNES[t.a]} e ${DOMINO_RUNES[t.b]}.`;
+  });
+
+  const door = {
+    type: 'domino',
+    title: 'Il Domino Runico',
+    instructions: `Ogni membro della squadra ha una tessera con due rune, ma non sa quale faccia va a sinistra o a destra. Il Sigillo mostrato sul board segna l'inizio della catena: incrociate a voce le tessere e componete la catena runica completa (${n} tessere), verso destra, facendo combaciare le facce uguali.`,
+    boardKind: 'dominoChain',
+    board: Array.from({ length: n }, () => null), // ogni slot: null oppure { player, flipped }
     choices: null,
+    sealRune: DOMINO_RUNES[path[0]],
     clues,
-    solution,
+    solution: { order: inversePerm, flipped: new Array(n).fill(false) },
+    needsRoster: true,
   };
+  // Solo per i test automatici: le tessere "naturali" nell'ordine corretto
+  // e il sigillo, mai inviati al client (vedi whitelist in server.js).
+  door._testTiles = naturalTiles;
+  door._testSeal = path[0];
+  return door;
 }
 
 // Stesso meccanismo affidabile de "Il Numero Mancante" (un passo costante,
@@ -593,14 +721,14 @@ function genToggles(numPlayers) {
 
 const DOOR_GENERATORS = {
   sum: genSumSecret,
-  sequence: genBrokenSequence,
+  scale: genScale,
   poetic: genPoeticClues,
   liar: genLiarClue,
   levers: genLevers,
   wheels: genWheels,
   colors: genColors,
   toggles: genToggles,
-  missing: genMissingNumber,
+  domino: genDomino,
   operation: genOperation,
   guess: genGuessSymbol,
   timeLever: genTimeLever,
@@ -658,6 +786,12 @@ function checkBoardCorrect(door, board) {
     case 'toggleSlots':
       if (!Array.isArray(board) || board.length !== door.solution.length) return false;
       return board.every((v, i) => Boolean(v) === Boolean(door.solution[i]));
+    case 'dominoChain': {
+      if (!Array.isArray(board) || board.length !== door.solution.order.length) return false;
+      return board.every((slot, i) => (
+        slot != null && slot.player === door.solution.order[i] && Boolean(slot.flipped) === Boolean(door.solution.flipped[i])
+      ));
+    }
     default:
       return false;
   }
@@ -702,6 +836,29 @@ function applyBoardUpdate(door, board, action) {
       if (action.slot < 0 || action.slot >= b.length) return board;
       b[action.slot] = !b[action.slot];
       return b;
+    case 'dominoChain': {
+      if (!action || action.slot == null || action.slot < 0 || action.slot >= b.length) return board;
+      if (action.kind === 'placeTile') {
+        const player = Math.round(Number(action.player));
+        if (!Number.isFinite(player) || player < 0 || player >= b.length) return board;
+        // Ogni giocatore ha una sola tessera: se era già posizionata altrove,
+        // la si "toglie" da lì prima di metterla nel nuovo slot.
+        for (let i = 0; i < b.length; i++) {
+          if (b[i] && b[i].player === player) b[i] = null;
+        }
+        b[action.slot] = { player, flipped: !!action.flipped };
+        return b;
+      }
+      if (action.kind === 'clearSlot') {
+        b[action.slot] = null;
+        return b;
+      }
+      if (action.kind === 'flipSlot') {
+        if (b[action.slot]) b[action.slot] = { ...b[action.slot], flipped: !b[action.slot].flipped };
+        return b;
+      }
+      return board;
+    }
     default:
       return board;
   }
@@ -728,4 +885,7 @@ module.exports = {
   speedBonusFor,
   numberRiddleClue,
   countSolutions,
+  countPermutations,
+  countDominoArrangements,
+  DOMINO_RUNES,
 };

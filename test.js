@@ -6,6 +6,7 @@ const {
   DOOR_TYPES, WHEEL_SYMBOLS, COLORS,
   generateDoor, generateDoors, randomDoorPlan, checkBoardCorrect, applyBoardUpdate,
   penaltyForAttempt, speedBonusFor, numberRiddleClue, countSolutions,
+  countPermutations, countDominoArrangements, DOMINO_RUNES,
 } = require('./gameLogic');
 
 // Riconosce i 4 formati prodotti da numberRiddleClue e ne ricalcola il valore:
@@ -54,13 +55,19 @@ function randIntForTest(min, max) { return min + Math.floor(Math.random() * (max
   check('sum: la soluzione è la somma dei numeri nascosti negli indizi', nums.reduce((a, b) => a + b, 0) === door.solution);
 }
 
-// ---- sequence: la soluzione è l'ordinamento crescente dei numeri ----------
-{
-  const door = generateDoor('sequence', 5);
-  const nums = door.clues.map((c) => Number(c.match(/\d+/)[0]));
-  const sorted = [...nums].sort((a, b) => a - b);
-  check('sequence: la soluzione è i numeri della squadra in ordine crescente', JSON.stringify(sorted) === JSON.stringify(door.solution));
-  check('sequence: i numeri sono tutti distinti', new Set(nums).size === nums.length);
+// ---- scale (La Bilancia degli Antenati): l'ordine dei giocatori per peso è deducibile CON CERTEZZA dai confronti a coppie ----
+for (const numPlayers of [2, 3, 4, 6]) {
+  const door = generateDoor('scale', numPlayers);
+  check(`scale/${numPlayers}p: ha ${numPlayers} indizi (uno a testa)`, door.clues.length === numPlayers);
+  check(`scale/${numPlayers}p: richiede il roster dei numeri giocatore`, door.needsRoster === true);
+  check(
+    `scale/${numPlayers}p: la soluzione è una permutazione valida dei numeri dei ${numPlayers} giocatori`,
+    door.solution.length === numPlayers && new Set(door.solution).size === numPlayers && door.solution.every((v) => v >= 1 && v <= numPlayers)
+  );
+  check(
+    `scale/${numPlayers}p: i confronti assegnati determinano UN SOLO ordinamento possibile (nessuna ambiguità)`,
+    countPermutations(numPlayers, door._testConstraints, 2) === 1
+  );
 }
 
 // ---- poetic: il numero segreto è ricostruibile CON CERTEZZA dalle cifre --
@@ -142,31 +149,37 @@ for (const numPlayers of [2, 3, 4, 6]) {
   check('toggles: la soluzione è fatta di booleani', door.solution.every((v) => typeof v === 'boolean'));
 }
 
-// ---- missing: il valore mancante è coerente con un passo costante --------
+// ---- domino (Il Domino Runico): la catena runica è ricostruibile CON CERTEZZA a partire dal sigillo, senza ambiguità di verso ----
 for (const numPlayers of [2, 3, 4, 6]) {
-  const door = generateDoor('missing', numPlayers);
-  const known = door.clues.map((c) => {
-    const m = c.match(/posizione (\d+) della sequenza vale (\d+)/);
-    return { pos: Number(m[1]), val: Number(m[2]) };
-  });
-  known.sort((a, b) => a.pos - b.pos);
-  // Tutte le coppie di posizioni note devono
-  // condividere lo STESSO passo costante, e quel passo applicato a una
-  // qualsiasi posizione nota deve produrre esattamente la soluzione nella
-  // posizione mancante.
-  const steps = [];
-  for (let i = 1; i < known.length; i++) {
-    steps.push((known[i].val - known[0].val) / (known[i].pos - known[0].pos));
+  const door = generateDoor('domino', numPlayers);
+  check(`domino/${numPlayers}p: ha ${numPlayers} indizi (uno a testa)`, door.clues.length === numPlayers);
+  check(`domino/${numPlayers}p: richiede il roster dei numeri giocatore`, door.needsRoster === true);
+  check(`domino/${numPlayers}p: ha un sigillo di partenza pubblico`, DOMINO_RUNES.includes(door.sealRune));
+  check(`domino/${numPlayers}p: ci sono esattamente ${numPlayers} tessere`, door._testTiles.length === numPlayers);
+  check(
+    `domino/${numPlayers}p: dato il sigillo, esiste UNA SOLA catena valida con queste tessere (nessuna ambiguità, nemmeno per inversione)`,
+    countDominoArrangements(door._testTiles, door._testSeal, 2) === 1
+  );
+  // door.solution.order[slot] = indice del giocatore la cui tessera va in quello slot.
+  // Verifica diretta: per ogni giocatore, la sua tessera (quella descritta nel SUO indizio)
+  // deve combaciare in catena nella posizione indicata dalla soluzione.
+  const tileForClue = (text) => {
+    const m = text.match(/rune: (\w+) e (\w+)\./);
+    return { a: DOMINO_RUNES.indexOf(m[1]), b: DOMINO_RUNES.indexOf(m[2]) };
+  };
+  const playerTiles = door.clues.map(tileForClue);
+  let needed = door._testSeal;
+  let chainOk = true;
+  for (let slot = 0; slot < numPlayers; slot++) {
+    const playerIdx = door.solution.order[slot];
+    const flipped = door.solution.flipped[slot];
+    const t = playerTiles[playerIdx];
+    const face = flipped ? t.b : t.a;
+    const other = flipped ? t.a : t.b;
+    if (face !== needed) { chainOk = false; break; }
+    needed = other;
   }
-  const allSameStep = steps.every((s) => s === steps[0]);
-  check(`missing/${numPlayers}p: tutte le posizioni note condividono lo stesso passo costante`, allSameStep);
-  const inferred = known[0].val + steps[0] * (0 - known[0].pos); // valore alla posizione 0 (base)
-  // ricostruiamo l'intera sequenza dal passo dedotto e verifichiamo la soluzione
-  const missingPosGuess = door.instructions.match(/posizione (\d+):/);
-  check(`missing/${numPlayers}p: ha ${numPlayers} indizi (uno a testa) e un'istruzione con la posizione mancante`, door.clues.length === numPlayers && !!missingPosGuess);
-  const missingPos = Number(missingPosGuess[1]);
-  const reconstructed = inferred + steps[0] * missingPos;
-  check(`missing/${numPlayers}p: il passo dedotto dagli indizi ricostruisce ESATTAMENTE il valore mancante`, reconstructed === door.solution);
+  check(`domino/${numPlayers}p: applicando l'ordine e l'orientamento della soluzione, la catena combacia rune-su-rune dal sigillo in poi`, chainOk);
 }
 
 // ---- map (La Mappa Strappata): stesso principio di "missing", più i dati per la resa visiva (`cells`) ----
@@ -339,6 +352,10 @@ for (const numPlayers of [2, 3, 4, 5, 6]) {
     } else if (door.boardKind === 'toggleSlots') {
       door.solution.forEach((target, i) => {
         if (target === true) board = applyBoardUpdate(door, board, { kind: 'toggleSlot', slot: i });
+      });
+    } else if (door.boardKind === 'dominoChain') {
+      door.solution.order.forEach((playerIdx, slot) => {
+        board = applyBoardUpdate(door, board, { kind: 'placeTile', slot, player: playerIdx, flipped: door.solution.flipped[slot] });
       });
     }
     if (!checkBoardCorrect(door, board)) allSolved = false;

@@ -37,6 +37,8 @@ function publicDoorView(door) {
     choices: door.choices,
     sliderMax: door.sliderMax,
     cells: door.cells,
+    sealRune: door.sealRune,
+    needsRoster: door.needsRoster,
   };
 }
 

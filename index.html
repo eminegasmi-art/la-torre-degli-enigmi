@@ -319,6 +319,44 @@
   .slot-toggle.on .toggle-knob { background: var(--good); }
   .slot-toggle.on .toggle-knob::after { left: 19px; }
 
+  .roster-strip { display: none; flex-wrap: wrap; gap: 4px; justify-content: center; flex-shrink: 0; }
+  .roster-strip.visible { display: flex; }
+  .roster-chip {
+    background: var(--wood-mid); border: 1px solid var(--gold); border-radius: 999px; padding: 2px 8px;
+    font-size: 0.6rem; color: var(--gold-light); font-family: 'Cinzel', serif; white-space: nowrap;
+  }
+
+  .domino-board { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+  .domino-seal {
+    font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.74rem; color: var(--ink); text-align: center;
+    background: linear-gradient(160deg, var(--gold-light), var(--gold)); border: 1px solid var(--ink);
+    border-radius: 999px; padding: 4px 12px;
+  }
+  .domino-chain { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; align-items: center; width: 100%; }
+  .domino-slot-wrap { position: relative; }
+  .domino-slot {
+    width: 50px; height: 56px; border-radius: 8px; border: 2px solid var(--gold); border-bottom-width: 4px;
+    background: linear-gradient(160deg, var(--wood-light), var(--wood-mid)); color: var(--gold-light);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.6rem;
+  }
+  .domino-slot.filled { background: linear-gradient(160deg, var(--gold-light), var(--gold)); color: var(--ink); }
+  .domino-slot-empty { color: var(--muted); font-size: 0.7rem; }
+  .domino-slot-player { font-size: 0.72rem; }
+  .domino-slot-arrow { font-size: 0.9rem; line-height: 1; }
+  .domino-clear-btn {
+    position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--blood); color: #fff; border: 1px solid var(--ink); font-size: 0.55rem; line-height: 1;
+    padding: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .domino-players { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .domino-chip {
+    width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--gold); background: var(--wood-mid);
+    color: var(--gold-light); font-family: 'Cinzel', serif; font-weight: 700; font-size: 0.82rem; padding: 0;
+  }
+  .domino-chip.selected { background: linear-gradient(180deg, var(--gold-light), var(--gold)); color: var(--ink); border-color: #fff; }
+  .domino-chip.placed { opacity: 0.5; }
+
   .log-box {
     background: var(--wood-mid); border: 1px solid var(--gold); border-radius: 6px; padding: 6px 10px;
     font-size: 0.66rem; color: var(--muted); max-height: 52px; overflow-y: auto; width: 100%; flex-shrink: 0;
@@ -417,6 +455,7 @@
       <div class="door-title" id="door-title">—</div>
     </div>
     <div class="door-instructions" id="door-instructions">—</div>
+    <div class="roster-strip" id="roster-strip"></div>
 
     <div class="clue-panel">
       <div class="clue-label">Il tuo indizio segreto</div>
@@ -453,6 +492,8 @@
   let lastDoorKey = null;
   let timerDeadline = null;
   let timerInterval = null;
+  let currentDoor = null; // riferimento sempre aggiornato alla porta corrente, usato dagli handler del domino
+  let dominoSelectedPlayer = null;
 
   const TOTAL_TIME_MS = 12 * 60 * 1000;
   // Devono restare identici a WHEEL_SYMBOLS / COLORS in gameLogic.js (ordine incluso).
@@ -695,10 +736,12 @@
     updateTimerDisplay(state.deadlineTs);
 
     const door = state.door;
+    currentDoor = door;
     document.getElementById('door-title').textContent = door.title;
     document.getElementById('door-instructions').textContent = door.instructions;
     document.getElementById('door-icon').src = doorImageFor(state.doorIndex, state.totalDoors);
     document.getElementById('clue-text').textContent = myClue || '...';
+    renderRoster(state);
 
     const key = state.doorIndex + '-' + door.type;
     if (key !== lastDoorKey) {
@@ -711,6 +754,75 @@
     const logBox = document.getElementById('log-box');
     logBox.innerHTML = state.log.map((l) => `<div>${escapeHtml(l)}</div>`).join('');
     logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  // Striscia numeri giocatore: mostrata solo per gli enigmi che devono
+  // riferirsi a "Giocatore N" (Bilancia degli Antenati, Domino Runico).
+  function renderRoster(state) {
+    const strip = document.getElementById('roster-strip');
+    if (!strip) return;
+    if (state.door && state.door.needsRoster && state.players) {
+      strip.innerHTML = state.players.map((p, i) => `<span class="roster-chip">G${i + 1} · ${escapeHtml(p.name)}</span>`).join('');
+      strip.classList.add('visible');
+    } else {
+      strip.classList.remove('visible');
+      strip.innerHTML = '';
+    }
+  }
+
+  // ---- Il Domino Runico: piazzamento tessere (giocatore + orientamento) ----
+  function onDominoSlotClick(slotIndex) {
+    if (!currentDoor) return;
+    if (dominoSelectedPlayer !== null) {
+      socket.emit('updateBoard', { kind: 'placeTile', slot: slotIndex, player: dominoSelectedPlayer, flipped: false });
+      dominoSelectedPlayer = null;
+      document.querySelectorAll('.domino-chip.selected').forEach((c) => c.classList.remove('selected'));
+    } else if (currentDoor.board[slotIndex]) {
+      socket.emit('updateBoard', { kind: 'flipSlot', slot: slotIndex });
+    }
+  }
+  function onDominoChipClick(playerIdx) {
+    dominoSelectedPlayer = dominoSelectedPlayer === playerIdx ? null : playerIdx;
+    document.querySelectorAll('.domino-chip').forEach((chip) => {
+      chip.classList.toggle('selected', Number(chip.dataset.player) === dominoSelectedPlayer);
+    });
+  }
+  // Aggiorna il contenuto degli slot e dei gettoni giocatore senza ricreare
+  // gli elementi (chiamata sia dopo la creazione iniziale sia a ogni update).
+  function paintDominoBoard(door) {
+    const area = document.getElementById('board-area');
+    area.querySelectorAll('.domino-slot-wrap').forEach((wrap, i) => {
+      const slotVal = door.board[i];
+      const slotBtn = wrap.querySelector('.domino-slot');
+      slotBtn.classList.toggle('filled', !!slotVal);
+      if (slotVal) {
+        slotBtn.innerHTML = `<span class="domino-slot-player">G${slotVal.player + 1}</span><span class="domino-slot-arrow">${slotVal.flipped ? '⇦' : '⇨'}</span>`;
+      } else {
+        slotBtn.innerHTML = `<span class="domino-slot-empty">${i + 1}</span>`;
+      }
+      let clearBtn = wrap.querySelector('.domino-clear-btn');
+      if (slotVal) {
+        if (!clearBtn) {
+          clearBtn = document.createElement('button');
+          clearBtn.type = 'button';
+          clearBtn.className = 'domino-clear-btn';
+          clearBtn.textContent = '✕';
+          clearBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            socket.emit('updateBoard', { kind: 'clearSlot', slot: i });
+          });
+          wrap.appendChild(clearBtn);
+        }
+      } else if (clearBtn) {
+        clearBtn.remove();
+      }
+    });
+    const placedPlayers = new Set(door.board.filter(Boolean).map((s) => s.player));
+    area.querySelectorAll('.domino-chip').forEach((chip) => {
+      const p = Number(chip.dataset.player);
+      chip.classList.toggle('placed', placedPlayers.has(p));
+      chip.classList.toggle('selected', p === dominoSelectedPlayer);
+    });
   }
 
   function renderBoard(door) {
@@ -849,6 +961,44 @@
         wrap.appendChild(slot);
       });
       area.appendChild(wrap);
+    } else if (door.boardKind === 'dominoChain') {
+      dominoSelectedPlayer = null;
+      const wrap = document.createElement('div');
+      wrap.className = 'domino-board';
+      const seal = document.createElement('div');
+      seal.className = 'domino-seal';
+      seal.innerHTML = `Sigillo di partenza: <b>${escapeHtml(door.sealRune)}</b>`;
+      wrap.appendChild(seal);
+
+      const chain = document.createElement('div');
+      chain.className = 'domino-chain';
+      door.board.forEach((_, i) => {
+        const slotWrap = document.createElement('div');
+        slotWrap.className = 'domino-slot-wrap';
+        const slotBtn = document.createElement('button');
+        slotBtn.type = 'button';
+        slotBtn.className = 'domino-slot';
+        slotBtn.addEventListener('click', () => onDominoSlotClick(i));
+        slotWrap.appendChild(slotBtn);
+        chain.appendChild(slotWrap);
+      });
+      wrap.appendChild(chain);
+
+      const playersRow = document.createElement('div');
+      playersRow.className = 'domino-players';
+      door.board.forEach((_, p) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'domino-chip';
+        chip.dataset.player = p;
+        chip.textContent = p + 1;
+        chip.addEventListener('click', () => onDominoChipClick(p));
+        playersRow.appendChild(chip);
+      });
+      wrap.appendChild(playersRow);
+
+      area.appendChild(wrap);
+      paintDominoBoard(door);
     }
   }
 
@@ -885,6 +1035,8 @@
       area.querySelectorAll('.slot-toggle').forEach((btn, i) => {
         btn.classList.toggle('on', !!door.board[i]);
       });
+    } else if (door.boardKind === 'dominoChain') {
+      paintDominoBoard(door);
     }
   }
 
